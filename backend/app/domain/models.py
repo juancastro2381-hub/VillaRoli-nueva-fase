@@ -1,0 +1,21 @@
+from datetime import date
+from enum import Enum
+from pydantic import BaseModel, Field, field_validator
+
+class BookingPolicy(str, Enum):
+    FULL_PROPERTY_WEEKDAY = "full_property_weekday"
+    FULL_PROPERTY_WEEKEND = "full_property_weekend"
+    FULL_PROPERTY_HOLIDAY = "full_property_holiday"
+    FAMILY_PLAN = "family_plan"
+
+class BookingRequest(BaseModel):
+    check_in: date
+    check_out: date
+    guest_count: int = Field(..., gt=0)
+    policy_type: BookingPolicy
+
+    @field_validator('check_out')
+    def validate_dates(cls, v, values):
+        if 'check_in' in values.data and v <= values.data['check_in']:
+            raise ValueError('Check-out must be after check-in')
+        return v
