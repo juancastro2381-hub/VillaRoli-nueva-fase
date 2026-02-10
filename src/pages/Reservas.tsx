@@ -99,40 +99,102 @@ const Reservas = () => {
   const onSubmit = async (data: ReservationFormValues) => {
     setIsSubmitting(true);
 
-    const tipoLabel = TIPO_RESERVA_LABELS[data.tipoReserva as TipoReserva];
-    const precioInfo = precioCalculado ? `\n💰 *Precio Estimado:* $${precioCalculado.total.toLocaleString()} COP\n   (${precioCalculado.descripcion})\n🛡️ *Depósito de garantía:* $${DEPOSITO_GARANTIA.toLocaleString()} COP (reembolsable)` : "";
+    try {
+      // Map frontend type to backend policy Enum
+      const policyMap: Record<string, string> = {
+        "pasadia": "day_pass",
+        "noches-entre-semana": "full_property_weekday",
+        "noches-fin-semana": "full_property_weekend",
+        "noches-festivo": "full_property_holiday",
+        "plan-familia": "family_plan"
+      };
 
-    const message = `🏡 *Nueva Solicitud de Reserva - Villa Roli*
+      const payload = {
+        check_in: data.checkin,
+        check_out: data.checkout || data.checkin, // For Pasadia, same day
+        guest_count: parseInt(data.huespedes),
+        policy_type: policyMap[data.tipoReserva],
+        guest_name: data.nombre,
+        guest_email: data.email,
+        guest_phone: data.telefono,
+        guest_city: data.ciudad,
+        payment_method: "ONLINE_GATEWAY" // Default for public
+      };
 
-👤 *Información del Cliente:*
-• Nombre: ${data.nombre}
-• Email: ${data.email}
-• Teléfono: ${data.telefono}
-${data.ciudad ? `• Ciudad: ${data.ciudad}` : ""}
+      const response = await fetch("/api/payments/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
-🏠 *Detalles de la Reserva:*
-• Tipo: ${tipoLabel}
-• Personas: ${data.huespedes}
-• ${isPasadia ? "Fecha" : "Check-in"}: ${data.checkin}
-${!isPasadia && data.checkout ? `• Check-out: ${data.checkout}` : ""}
-${!isPasadia && data.checkout ? `• Noches: ${noches}` : ""}
-${precioInfo}
+      const result = await response.json();
 
-${data.mensaje ? `💬 *Comentarios:*\n${data.mensaje}` : ""}
+      if (!response.ok) {
+        // Handle Validation Errors
+        let errorMessage = "No pudimos procesar tu solicitud.";
 
----
-Enviado desde el formulario web de Villa Roli`;
+        if (response.status === 422) {
+          // Backend returns { error_code, message, details }
+          errorMessage = translateError(result.error_code) || result.message || "Datos inválidos.";
+        } else if (response.status === 409) {
+          errorMessage = "Las fechas seleccionadas ya no están disponibles.";
+        } else {
+          errorMessage = result.message || "Error del servidor.";
+        }
 
-    const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodedMessage}`;
-    window.open(whatsappUrl, "_blank");
+        toast({
+          variant: "destructive",
+          title: "Error en la reserva",
+          description: errorMessage,
+        });
+        return;
+      }
 
-    toast({
-      title: "¡Redirigiendo a WhatsApp!",
-      description: "Te hemos abierto WhatsApp para que envíes tu solicitud de reserva directamente.",
-    });
+      // Success
+      toast({
+        title: "¡Reserva iniciada!",
+        description: "Te estamos redirigiendo a la pasarela de pago...",
+      });
 
-    setIsSubmitting(false);
+      // Redirect to Payment URL (Simulated or Real)
+      if (result.payment_url) {
+        window.location.href = result.payment_url;
+      } else {
+        // Fallback for non-payment flows (e.g. manual confirmation if changed)
+        toast({
+          title: "Solicitud Recibida",
+          description: "Tu reserva ID " + result.booking_id + " ha sido creada. Te contactaremos pronto.",
+        });
+      }
+
+    } catch (error) {
+      console.error(error);
+      toast({
+        variant: "destructive",
+        title: "Error de conexión",
+        description: "No pudimos conectar con el servidor. Intenta nuevamente.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Helper to translate backend error codes
+  const translateError = (code: string) => {
+    const errors: Record<string, string> = {
+      "DAY_PASS_OVERNIGHT": "Los pasadías deben iniciar y terminar el mismo día.",
+      "MIN_PEOPLE_REQUIRED": "Este plan requiere un mínimo de personas (10 para Finca Completa).",
+      "INVALID_WEEKDAY_DATES": "El plan Entre Semana es solo de Lunes a Jueves.",
+      "INVALID_WEEKEND_DATES": "El plan Fin de Semana es Viernes a Domingo.",
+      "HOLIDAY_MISMATCH": "Las fechas no coinciden con un puente festivo válido.",
+      "FAMILY_PLAN_MAX_GUESTS": "El Plan Familia es para máximo 5 personas.",
+      "FAMILY_PLAN_ONE_NIGHT": "El Plan Familia es para exactamente 1 noche.",
+      "FAMILY_PLAN_NO_HOLIDAY": "El Plan Familia no aplica en festivos.",
+      "OverbookingError": "Las fechas seleccionadas no están disponibles."
+    };
+    return errors[code];
   };
 
   // Opciones de personas según tipo de reserva

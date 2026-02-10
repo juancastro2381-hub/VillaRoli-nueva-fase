@@ -112,6 +112,34 @@ export function TestimonialsSection() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    // Fetch testimonials from API
+    const fetchTestimonials = async () => {
+      try {
+        const res = await fetch("/api/content/testimonials");
+        if (res.ok) {
+          const data = await res.json();
+          // Map backend fields to frontend
+          const mapped = data.map((t: any) => ({
+            name: t.name,
+            location: t.city || "Viajero",
+            date: new Date(t.created_at).toLocaleDateString(),
+            rating: t.rating,
+            text: t.comment,
+            type: "Verificado",
+            source: "Web",
+          }));
+          if (mapped.length > 0) {
+            setTestimonials(mapped);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching testimonials", err);
+      }
+    };
+    fetchTestimonials();
+  }, []);
+
+  useEffect(() => {
     if (!api) return;
 
     setCount(api.scrollSnapList().length);
@@ -120,7 +148,7 @@ export function TestimonialsSection() {
     api.on("select", () => {
       setCurrent(api.selectedScrollSnap());
     });
-  }, [api]);
+  }, [api, testimonials]); // Update when testimonials change
 
   // Auto-play
   useEffect(() => {
@@ -133,7 +161,7 @@ export function TestimonialsSection() {
     return () => clearInterval(interval);
   }, [api]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validation
@@ -157,33 +185,39 @@ export function TestimonialsSection() {
 
     setIsSubmitting(true);
 
-    // Simulate network delay
-    setTimeout(() => {
-      const newTestimonial = {
-        name: name,
-        location: "Reciente",
-        date: "Hoy",
-        rating: 5, // Default for new user testimonials
-        text: message,
-        type: "Huésped verificado",
-        source: "Directo",
-      };
-
-      setTestimonials([newTestimonial, ...testimonials]);
-      setIsOpen(false);
-      setName("");
-      setMessage("");
-      setIsSubmitting(false);
-
-      toast({
-        title: "¡Gracias por tu opinión!",
-        description: "Tu testimonio ha sido agregado a nuestra lista.",
+    try {
+      const response = await fetch("/api/admin/content/testimonials", { // Using Admin Endpoint temporarily as public submission
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          comment: message,
+          rating: 5,
+          city: "Web User"
+        })
       });
 
-      // Scroll to first item to show the new one
-      if (api) api.scrollTo(0);
+      if (response.ok) {
+        toast({
+          title: "¡Gracias por tu opinión!",
+          description: "Tu testimonio ha sido enviado para moderación.",
+        });
+        setIsOpen(false);
+        setName("");
+        setMessage("");
+      } else {
+        throw new Error("Error submitting");
+      }
 
-    }, 1000);
+    } catch (e) {
+      toast({
+        title: "Error",
+        description: "No pudimos enviar tu testimonio. Intenta más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -342,8 +376,8 @@ export function TestimonialsSection() {
                 key={index}
                 onClick={() => api?.scrollTo(index)}
                 className={`w-2 h-2 rounded-full transition-all duration-300 ${index === current
-                    ? "bg-gold w-6"
-                    : "bg-primary-foreground/30 hover:bg-primary-foreground/50"
+                  ? "bg-gold w-6"
+                  : "bg-primary-foreground/30 hover:bg-primary-foreground/50"
                   }`}
                 aria-label={`Ir a reseña ${index + 1}`}
               />

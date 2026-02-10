@@ -13,7 +13,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8010',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
         // Note: Our backend routes are /auth, /bookings, /admin. 
@@ -21,11 +21,11 @@ export default defineConfig({
         // If frontend calls /api/bookings -> backend /bookings.
       },
       '/auth': {
-        target: 'http://localhost:8010',
+        target: 'http://localhost:8000',
         changeOrigin: true
       },
       '/admin': {
-        target: 'http://localhost:8010',
+        target: 'http://localhost:8000',
         changeOrigin: true
       }
     }

@@ -40,36 +40,35 @@ const Contacto = () => {
   const onSubmit = async (data: ContactFormValues) => {
     setIsSubmitting(true);
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      const response = await fetch("/api/content/contacts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
 
-    // Construct WhatsApp message with form data
-    const message = `✉️ *Nuevo Mensaje de Contacto - Villa Roli*
+      if (!response.ok) {
+        throw new Error("Error al enviar el mensaje");
+      }
 
-👤 *De:* ${data.nombre}
-📧 *Email:* ${data.email}
-📱 *Teléfono:* ${data.telefono || "No proporcionado"}
-📝 *Asunto:* ${data.asunto}
+      toast({
+        title: "¡Mensaje Recibido!",
+        description: "Gracias por contactarnos. Te responderemos pronto.",
+      });
 
-💬 *Mensaje:*
-${data.mensaje}
-
----
-Enviado desde el sitio web`;
-
-    const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/573229726625?text=${encodedMessage}`;
-
-    // Open WhatsApp
-    window.open(whatsappUrl, "_blank");
-
-    toast({
-      title: "¡Mensaje Enviado!",
-      description: "Te hemos redirigido a WhatsApp para enviar tu mensaje.",
-    });
-
-    setIsSubmitting(false);
-    form.reset();
+      form.reset();
+    } catch (error) {
+      console.error(error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No pudimos enviar tu mensaje. Intenta de nuevo.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

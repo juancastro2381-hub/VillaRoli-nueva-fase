@@ -12,22 +12,34 @@ export default function Login() {
         e.preventDefault();
         setError('');
 
+        // Clear any existing token
+        localStorage.removeItem('token');
+
         try {
             // The backend expects x-www-form-urlencoded for OAuth2PasswordRequestForm
             const formData = new URLSearchParams();
             formData.append('username', email);
             formData.append('password', password);
 
+            console.log('Attempting login...');
             const response = await api.post('/auth/token', formData, {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
             });
 
-            localStorage.setItem('token', response.data.access_token);
-            navigate('/');
+            if (response.data.access_token) {
+                console.log('Login successful, saving token.');
+                localStorage.setItem('token', response.data.access_token);
+                // Ensure the token is set before navigating
+                setTimeout(() => navigate('/'), 100);
+            } else {
+                throw new Error('No access token received');
+            }
         } catch (err: any) {
+            console.error('Login failed:', err);
             setError('Invalid credentials');
         }
     };
+
 
     return (
         <div className="flex items-center justify-center min-h-screen bg-gray-100">

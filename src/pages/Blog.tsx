@@ -5,11 +5,43 @@ import { ArrowRight, Calendar, User } from "lucide-react";
 import fincaVistaAerea from "@/assets/finca-vista-aerea1.jpg";
 import { BLOG_POSTS, CATEGORY_COLORS } from "@/data/blog";
 import { SingleBlogView } from "@/components/blog/SingleBlogView";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 const Blog = () => {
   const { slug } = useParams();
 
+  const [posts, setPosts] = useState(BLOG_POSTS);
+
+  // Fetch posts from API
+  useEffect(() => {
+    const fetchPosts = async () => {
+      try {
+        const res = await fetch("/api/content/blog");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.length > 0) {
+            const mapped = data.map((p: any) => ({
+              slug: p.slug,
+              title: p.title,
+              excerpt: p.content.substring(0, 100) + "...",
+              content: p.content,
+              image: p.cover_image || fincaVistaAerea,
+              category: "General",
+              author: "Admin",
+              date: new Date(p.published_at || Date.now()).toLocaleDateString()
+            }));
+            setPosts(mapped);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    fetchPosts();
+  }, []);
+
+  // Update logic to use state posts instead of constant
   // Scroll to top when slug changes
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -68,7 +100,7 @@ const Blog = () => {
       <section className="section-padding bg-background">
         <div className="container-custom">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {BLOG_POSTS.map((post, index) => (
+            {posts.map((post, index) => (
               <motion.article
                 key={post.slug}
                 initial={{ opacity: 0, y: 30 }}

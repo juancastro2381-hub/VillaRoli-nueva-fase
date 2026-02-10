@@ -13,20 +13,20 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
   return children;
 }
 
+import ContentMessages from './pages/ContentMessages';
+import ContentTestimonials from './pages/ContentTestimonials';
+import ContentBlog from './pages/ContentBlog';
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/messages" element={<ProtectedRoute><ContentMessages /></ProtectedRoute>} />
+          <Route path="/testimonials" element={<ProtectedRoute><ContentTestimonials /></ProtectedRoute>} />
+          <Route path="/blog" element={<ProtectedRoute><ContentBlog /></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

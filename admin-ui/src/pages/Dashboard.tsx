@@ -35,7 +35,15 @@ export default function Dashboard() {
         <div className="min-h-screen bg-gray-50">
             <nav className="bg-white shadow">
                 <div className="flex items-center justify-between px-4 py-4 mx-auto max-w-7xl">
-                    <h1 className="text-xl font-bold">Admin Dashboard</h1>
+                    <div className="flex items-center gap-6">
+                        <h1 className="text-xl font-bold cursor-pointer" onClick={() => navigate('/')}>Admin Dashboard</h1>
+                        <div className="flex gap-4 text-sm font-medium text-gray-600">
+                            <span onClick={() => navigate('/')} className="cursor-pointer hover:text-blue-600">Bookings</span>
+                            <span onClick={() => navigate('/messages')} className="cursor-pointer hover:text-blue-600">Mensajes</span>
+                            <span onClick={() => navigate('/testimonials')} className="cursor-pointer hover:text-blue-600">Testimonios</span>
+                            <span onClick={() => navigate('/blog')} className="cursor-pointer hover:text-blue-600">Blog</span>
+                        </div>
+                    </div>
                     <button onClick={handleLogout} className="flex items-center gap-2 text-gray-600 hover:text-red-500">
                         <LogOut size={20} />
                         Logout

@@ -32,7 +32,21 @@ class Booking(Base):
     status = Column(SQLEnum(BookingStatus), default=BookingStatus.PENDING, index=True)
     
     guest_count = Column(Integer, default=1)
+    
+    # Guest Details (Public Booking)
+    guest_name = Column(String, nullable=True)
+    guest_email = Column(String, nullable=True)
+    guest_phone = Column(String, nullable=True) # WhatsApp
+    guest_city = Column(String, nullable=True)
+    
     policy_type = Column(SQLEnum(BookingPolicy), nullable=False)
+    
+    # Phase 5: Admin Override & Audit
+    is_override = Column(Boolean, default=False)
+    override_reason = Column(String, nullable=True)
+    rules_bypassed = Column(String, nullable=True) # Checkbox list or text
+    created_by_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    override_created_at = Column(Date, nullable=True) # Timestamp of override
     
     property = relationship("Property", back_populates="bookings")
 
@@ -52,25 +66,86 @@ class PaymentProvider(str, enum.Enum):
     MERCADOPAGO = "MERCADOPAGO"
     DUMMY = "DUMMY" # For testing
 
+class PaymentMethod(str, enum.Enum):
+    ONLINE_GATEWAY = "ONLINE_GATEWAY"
+    BANK_TRANSFER = "BANK_TRANSFER"
+    DIRECT_ADMIN_AGREEMENT = "DIRECT_ADMIN_AGREEMENT"
+
 class PaymentStatus(str, enum.Enum):
-    PENDING = "PENDING"
-    COMPLETED = "COMPLETED"
+    PENDING_PAYMENT = "PENDING_PAYMENT"
+    PAID = "PAID"
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
+    # Bank Transfer specific
+    AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION"
+    # Direct Agreement specific
+    PENDING_DIRECT_PAYMENT = "PENDING_DIRECT_PAYMENT"
+    CONFIRMED_DIRECT_PAYMENT = "CONFIRMED_DIRECT_PAYMENT"
 
 class Payment(Base):
     __tablename__ = "payments"
     
     id = Column(Integer, primary_key=True, index=True)
     booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False)
-    provider = Column(SQLEnum(PaymentProvider), nullable=False)
-    transaction_id = Column(String, index=True, nullable=True) # Provider's ID
-    amount = Column(Integer, nullable=False) # Store in cents/minor units to avoid float issues
+    provider = Column(SQLEnum(PaymentProvider), nullable=False) # Keep provider for gateway info (STRIPE, WOMPI)
+    payment_method = Column(SQLEnum(PaymentMethod), default=PaymentMethod.ONLINE_GATEWAY)
+    
+    transaction_id = Column(String, index=True, nullable=True) # Provider's ID or Bank Ref
+    payment_reference = Column(String, nullable=True) # Manual reference code
+    
+    amount = Column(Integer, nullable=False)
     currency = Column(String, default="COP")
-    status = Column(SQLEnum(PaymentStatus), default=PaymentStatus.PENDING, index=True)
-    payload = Column(String, nullable=True) # JSON payload for audit (store as string for compatibility)
-    created_at = Column(Date, default=date.today) # Ideally timestamp
+    status = Column(SQLEnum(PaymentStatus), default=PaymentStatus.PENDING_PAYMENT, index=True)
+    payload = Column(String, nullable=True)
+    
+    created_at = Column(Date, default=date.today)
+    confirmed_at = Column(Date, nullable=True)
+    confirmed_by_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
     booking = relationship("Booking", back_populates="payments")
+
+# Update Booking to include Audit fields
+# Note: modifying existing Booking class definitions requiring re-declaring it or using alter if this was a migration script.
+# Since we are simple file replacement, we assume we can edit the Booking class above. 
+# But wait, looking at the file structure, Booking is separate. I should edit the Booking class directly.
+
+
+
+# Content Modules
+class Contact(Base):
+    __tablename__ = "contacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    phone = Column(String, nullable=True)
+    message = Column(String, nullable=False)
+    status = Column(String, default="NEW") # NEW, RESPONDED, ARCHIVED
+    created_at = Column(Date, default=date.today)
+
+class Testimonial(Base):
+    __tablename__ = "testimonials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    city = Column(String, nullable=True)
+    rating = Column(Integer, default=5)
+    comment = Column(String, nullable=False)
+    is_approved = Column(Boolean, default=False)
+    created_at = Column(Date, default=date.today)
+
+class BlogPost(Base):
+    __tablename__ = "blog_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String, unique=True, index=True, nullable=False)
+    title = Column(String, nullable=False)
+    content = Column(String, nullable=False) # Markdown or HTML
+    cover_image = Column(String, nullable=True)
+    status = Column(String, default="DRAFT") # DRAFT, PUBLISHED
+    published_at = Column(Date, nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    author = relationship("User")
 
 Booking.payments = relationship("Payment", back_populates="booking")
