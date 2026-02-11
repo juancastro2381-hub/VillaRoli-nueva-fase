@@ -20,6 +20,10 @@ class BookingRequest(BaseModel):
     guest_email: str | None = None
     guest_phone: str | None = None
     guest_city: str | None = None
+    
+    # Payment Preference
+    payment_method: str = "ONLINE_GATEWAY"
+    payment_type: str = "FULL" # FULL or PARTIAL
 
     @field_validator('check_out')
     def validate_dates(cls, v, values):

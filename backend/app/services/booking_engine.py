@@ -15,6 +15,9 @@ class BookingService:
         """
         Validates the booking request against the selected policy rules (PURE DOMAIN LOGIC).
         """
+        # Common Validation (Past dates, min nights)
+        rules.validate_dates_common(request)
+
         if request.policy_type == BookingPolicy.FULL_PROPERTY_WEEKDAY:
             rules.validate_full_property_weekday(request)
             
@@ -64,7 +67,10 @@ class BookingService:
         if not self.repo:
             raise Exception("Repository not initialized")
 
-        # 2. Availability Check (PHYSICAL CONSTRAINT - CANNOT BE OVERRIDDEN)
+        # 2. Lock Property to prevent Race Conditions (Double Booking)
+        self.repo.lock_property(property_id)
+
+        # 3. Availability Check (PHYSICAL CONSTRAINT - CANNOT BE OVERRIDDEN)
         is_available = self.repo.check_availability(property_id, request.check_in, request.check_out)
         
         if not is_available:
@@ -73,6 +79,10 @@ class BookingService:
         # 3. Persist
         booking_data = request.model_dump()
         booking_data['property_id'] = property_id
+        
+        # Remove fields not in Booking table
+        if 'payment_method' in booking_data:
+            del booking_data['payment_method']
         
         # Add Override/Audit fields
         if is_override:

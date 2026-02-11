@@ -1,15 +1,16 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum, Date
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum, Date, DateTime
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.domain.models import BookingPolicy
 import enum
-from datetime import date
+from datetime import date, datetime
 
 class BookingStatus(str, enum.Enum):
     PENDING = "PENDING"
     CONFIRMED = "CONFIRMED"
     CANCELLED = "CANCELLED"
     BLOCKED = "BLOCKED"
+    EXPIRED = "EXPIRED"
 
 class Property(Base):
     __tablename__ = "properties"
@@ -20,6 +21,10 @@ class Property(Base):
     max_guests = Column(Integer, default=2)
     
     bookings = relationship("Booking", back_populates="property")
+
+class PaymentType(str, enum.Enum):
+    FULL = "FULL"
+    PARTIAL = "PARTIAL"
 
 class Booking(Base):
     __tablename__ = "bookings"
@@ -40,6 +45,10 @@ class Booking(Base):
     guest_city = Column(String, nullable=True)
     
     policy_type = Column(SQLEnum(BookingPolicy), nullable=False)
+    
+    # Payment Info
+    payment_type = Column(SQLEnum(PaymentType), default=PaymentType.FULL)
+    expires_at = Column(DateTime, nullable=True) # For 60-min expiration
     
     # Phase 5: Admin Override & Audit
     is_override = Column(Boolean, default=False)

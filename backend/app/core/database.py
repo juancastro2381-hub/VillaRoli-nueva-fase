@@ -4,11 +4,13 @@ from sqlalchemy.orm import sessionmaker
 
 # For this demo, we use SQLite. For production, switch to: 
 # SQLALCHEMY_DATABASE_URL = "mysql+pymysql://user:password@localhost/dbname"
-SQLALCHEMY_DATABASE_URL = "sqlite:///./villa_roli.db"
-
+from app.core.config import settings
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 # connect_args={"check_same_thread": False} is needed only for SQLite
+connect_args = {"check_same_thread": False} if "sqlite" in SQLALCHEMY_DATABASE_URL else {}
+
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL, connect_args=connect_args
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

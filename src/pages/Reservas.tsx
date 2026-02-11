@@ -96,11 +96,53 @@ const Reservas = () => {
 
   const isPasadia = tipoReserva === "pasadia";
 
+  // Opciones de personas según tipo de reserva
+  const personasOptions = useMemo(() => {
+    if (tipoReserva === "plan-familia") return [1, 2, 3, 4, 5];
+    if (tipoReserva === "pasadia") return Array.from({ length: 100 }, (_, i) => i + 1);
+    return Array.from({ length: 37 }, (_, i) => i + 1);
+  }, [tipoReserva]);
+
+
+  // Helper to translate backend error codes
+  const translateError = (code: string) => {
+    const errors: Record<string, string> = {
+      "PAST_DATE_NOT_ALLOWED": "No puedes seleccionar fechas pasadas para realizar una reserva.",
+      "MIN_NIGHTS_REQUIRED": "Este plan requiere mínimo una noche de estadía.",
+      "DAY_PASS_INVALID_RANGE": "El plan Pasadía solo permite seleccionar una sola fecha. Por favor elige un solo día.",
+      "MIN_PEOPLE_NOT_MET": "Este plan requiere un mínimo de personas (10 para Finca Completa).",
+      "INVALID_WEEKDAY_DATES": "La Finca Completa entre semana solo se puede reservar de lunes a jueves.",
+      "INVALID_WEEKEND_DATES": "El plan Fin de Semana es Viernes a Domingo (noches de viernes y sábado).",
+      "HOLIDAY_REQUIRED": "Este plan solo aplica para fines de semana que tengan un día festivo asociado.",
+      "PLAN_NOT_ALLOWED_ON_HOLIDAY": "Este plan no está permitido en fechas festivas.",
+      "FAMILY_PLAN_LIMIT_EXCEEDED": "El Plan Familia es válido solo para máximo 5 personas.",
+      "FAMILY_PLAN_ONE_NIGHT": "El Plan Familia es para exactamente 1 noche.",
+      "OVERBOOKING_NOT_ALLOWED": "Las fechas seleccionadas ya están reservadas. Por favor elige otras fechas.",
+      "OverbookingError": "Las fechas seleccionadas no están disponibles."
+    };
+    return errors[code] || "Error en la validación de la reserva: " + code;
+  };
+
+  const [showPaymentSelection, setShowPaymentSelection] = useState(false);
+  const [formData, setFormData] = useState<ReservationFormValues | null>(null);
+
   const onSubmit = async (data: ReservationFormValues) => {
+    // 1. Validate form local (Zod does this)
+    // 2. Move to Payment Selection
+    setFormData(data);
+    setShowPaymentSelection(true);
+    toast({
+      title: "Paso 1 completado",
+      description: "Ahora selecciona tu método de pago.",
+    });
+  };
+
+  const handleFinalizeReservation = async (method: string, type: string) => {
+    if (!formData) return;
     setIsSubmitting(true);
+    console.log(`🚀 Initiating Booking... Method: ${method}, Type: ${type}`);
 
     try {
-      // Map frontend type to backend policy Enum
       const policyMap: Record<string, string> = {
         "pasadia": "day_pass",
         "noches-entre-semana": "full_property_weekday",
@@ -110,99 +152,168 @@ const Reservas = () => {
       };
 
       const payload = {
-        check_in: data.checkin,
-        check_out: data.checkout || data.checkin, // For Pasadia, same day
-        guest_count: parseInt(data.huespedes),
-        policy_type: policyMap[data.tipoReserva],
-        guest_name: data.nombre,
-        guest_email: data.email,
-        guest_phone: data.telefono,
-        guest_city: data.ciudad,
-        payment_method: "ONLINE_GATEWAY" // Default for public
+        check_in: formData.checkin,
+        check_out: formData.checkout || formData.checkin,
+        guest_count: parseInt(formData.huespedes),
+        policy_type: policyMap[formData.tipoReserva],
+        guest_name: formData.nombre,
+        guest_email: formData.email,
+        guest_phone: formData.telefono,
+        guest_city: formData.ciudad,
+        payment_method: method,
+        payment_type: type
       };
 
-      const response = await fetch("/api/payments/checkout", {
+      console.log("📦 Sending Payload:", payload);
+
+      const response = await fetch("http://localhost:8000/payments/checkout", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
       const result = await response.json();
+      console.log("📩 Backend Response:", result);
 
       if (!response.ok) {
-        // Handle Validation Errors
         let errorMessage = "No pudimos procesar tu solicitud.";
 
-        if (response.status === 422) {
-          // Backend returns { error_code, message, details }
-          errorMessage = translateError(result.error_code) || result.message || "Datos inválidos.";
-        } else if (response.status === 409) {
-          errorMessage = "Las fechas seleccionadas ya no están disponibles.";
-        } else {
-          errorMessage = result.message || "Error del servidor.";
+        // Handle Logic Errors (422/409 with error_code)
+        if (result.error_code) {
+          errorMessage = translateError(result.error_code);
+        }
+        // Handle Pydantic Validation Errors (422 with detail array)
+        else if (Array.isArray(result.detail)) {
+          const firstError = result.detail[0];
+          errorMessage = `Error: ${firstError.msg} en ${firstError.loc.join(".")}`;
+        }
+        else if (result.message) {
+          errorMessage = result.message;
         }
 
+        console.error("❌ Booking Failed:", errorMessage);
         toast({
           variant: "destructive",
           title: "Error en la reserva",
           description: errorMessage,
         });
+        setIsSubmitting(false);
         return;
       }
 
-      // Success
-      toast({
-        title: "¡Reserva iniciada!",
-        description: "Te estamos redirigiendo a la pasarela de pago...",
-      });
+      // Success Logic
+      console.log("✅ Booking Created! ID:", result.booking_id);
 
-      // Redirect to Payment URL (Simulated or Real)
-      if (result.payment_url) {
-        window.location.href = result.payment_url;
+      // Explicit Redirection Logic
+      if (method === "ONLINE_GATEWAY") {
+        if (result.payment_url) {
+          console.log("🔗 Redirecting to Payment URL:", result.payment_url);
+          window.location.href = result.payment_url;
+          return; // Prevent further execution
+        } else {
+          console.error("❌ Missing Payment URL in response:", result);
+          toast({
+            variant: "destructive",
+            title: "Error de Pago",
+            description: "El servidor no devolvió la URL de pago. Por favor contacta soporte."
+          });
+          setIsSubmitting(false);
+        }
+      } else if (method === "BANK_TRANSFER") {
+        console.log("🏦 Redirecting to Success Page (Bank Transfer)");
+        window.location.href = `/checkout/success?booking_id=${result.booking_id}&method=bt&expires=${result.expires_at}`;
+        return;
       } else {
-        // Fallback for non-payment flows (e.g. manual confirmation if changed)
-        toast({
-          title: "Solicitud Recibida",
-          description: "Tu reserva ID " + result.booking_id + " ha sido creada. Te contactaremos pronto.",
-        });
+        // Direct Agreement
+        console.log("🤝 Redirecting to Success Page (Direct)");
+        window.location.href = `/checkout/success?booking_id=${result.booking_id}&method=direct`;
+        return;
       }
 
     } catch (error) {
-      console.error(error);
+      console.error("🔥 Network/Runtime Error:", error);
       toast({
         variant: "destructive",
         title: "Error de conexión",
-        description: "No pudimos conectar con el servidor. Intenta nuevamente.",
+        description: "No pudimos conectar con el servidor. Verifica tu conexión a internet.",
       });
-    } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Helper to translate backend error codes
-  const translateError = (code: string) => {
-    const errors: Record<string, string> = {
-      "DAY_PASS_OVERNIGHT": "Los pasadías deben iniciar y terminar el mismo día.",
-      "MIN_PEOPLE_REQUIRED": "Este plan requiere un mínimo de personas (10 para Finca Completa).",
-      "INVALID_WEEKDAY_DATES": "El plan Entre Semana es solo de Lunes a Jueves.",
-      "INVALID_WEEKEND_DATES": "El plan Fin de Semana es Viernes a Domingo.",
-      "HOLIDAY_MISMATCH": "Las fechas no coinciden con un puente festivo válido.",
-      "FAMILY_PLAN_MAX_GUESTS": "El Plan Familia es para máximo 5 personas.",
-      "FAMILY_PLAN_ONE_NIGHT": "El Plan Familia es para exactamente 1 noche.",
-      "FAMILY_PLAN_NO_HOLIDAY": "El Plan Familia no aplica en festivos.",
-      "OverbookingError": "Las fechas seleccionadas no están disponibles."
-    };
-    return errors[code];
-  };
+  if (showPaymentSelection && formData && precioCalculado) {
+    return (
+      <Layout>
+        <div className="section-padding bg-gray-50 min-h-[60vh]">
+          <div className="container-custom max-w-3xl">
+            <h2 className="text-3xl font-display font-bold text-center mb-8">Selecciona tu Método de Pago</h2>
 
-  // Opciones de personas según tipo de reserva
-  const personasOptions = useMemo(() => {
-    if (tipoReserva === "plan-familia") return [1, 2, 3, 4, 5];
-    if (tipoReserva === "pasadia") return Array.from({ length: 100 }, (_, i) => i + 1);
-    return Array.from({ length: 37 }, (_, i) => i + 1);
-  }, [tipoReserva]);
+            <div className="bg-white rounded-xl shadow-lg p-8 border border-gray-100">
+              <div className="flex justify-between items-center border-b pb-4 mb-6">
+                <h3 className="font-semibold text-lg text-gray-700">Resumen de Pago</h3>
+                <button onClick={() => setShowPaymentSelection(false)} className="text-gold underline text-sm">Volver</button>
+              </div>
+
+              <div className="space-y-4 mb-8">
+                <div className="flex justify-between text-gray-600">
+                  <span>Total a Pagar:</span>
+                  <span className="font-bold text-xl">${precioCalculado.total.toLocaleString()} COP</span>
+                </div>
+                <div className="flex justify-between text-gray-500 text-sm">
+                  <span>Opción Abono (50%):</span>
+                  <span>${(precioCalculado.total * 0.5).toLocaleString()} COP</span>
+                </div>
+              </div>
+
+              <div className="video-options space-y-4">
+                {/* Online Payment */}
+                <div className="border rounded-lg p-4 hover:border-gold transition cursor-pointer bg-blue-50/50">
+                  <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><Sun size={18} /> Pago Online (Tarjetas / PSE)</h4>
+                  <div className="flex gap-4 mt-3">
+                    <Button
+                      className="flex-1 bg-blue-600 hover:bg-blue-700"
+                      onClick={() => handleFinalizeReservation("ONLINE_GATEWAY", "FULL")}
+                      disabled={isSubmitting}
+                    >
+                      Pagar Totalidad
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1 border-blue-600 text-blue-600 hover:bg-blue-50"
+                      onClick={() => handleFinalizeReservation("ONLINE_GATEWAY", "PARTIAL")}
+                      disabled={isSubmitting}
+                    >
+                      Abonar 50%
+                    </Button>
+                  </div>
+                  <p className="text-xs text-blue-800/60 mt-2">Confirmación inmediata.</p>
+                </div>
+
+                {/* Bank Transfer */}
+                <div className="border rounded-lg p-4 hover:border-gold transition cursor-pointer bg-white">
+                  <h4 className="font-bold text-gray-800 mb-2 flex items-center gap-2"><Home size={18} /> Transferencia Bancaria</h4>
+                  <p className="text-sm text-gray-500 mb-3">Nequi, Daviplata o Bancolombia. Tienes 60 minutos para enviar el comprobante.</p>
+                  <Button
+                    className="w-full bg-gray-800 hover:bg-gray-900"
+                    onClick={() => handleFinalizeReservation("BANK_TRANSFER", "PARTIAL")}
+                    disabled={isSubmitting}
+                  >
+                    Reservar con Abono (50%)
+                  </Button>
+                </div>
+
+                {/* Alert 60 min */}
+                <div className="flex items-start gap-2 text-xs text-orange-600 bg-orange-50 p-3 rounded">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <p>Al seleccionar "Abonar 50%" o "Transferencia", tu reserva quedará reservada por 60 minutos hasta que se confirme el pago.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    )
+  }
 
   return (
     <Layout>
@@ -214,6 +325,8 @@ const Reservas = () => {
             alt="Reservas en Villa Roli"
             className="w-full h-full object-cover"
             loading="lazy"
+            height="100%"
+            width="100%"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/20 to-black/40" />
         </div>
@@ -641,7 +754,7 @@ const Reservas = () => {
                     disabled={isSubmitting || !validacionPersonas.valido}
                   >
                     <MessageCircle size={22} />
-                    {isSubmitting ? "Abriendo WhatsApp..." : "Enviar Solicitud por WhatsApp"}
+                    {isSubmitting ? "Abriendo Reservas..." : "Realizar Reserva"}
                   </Button>
                 </form>
               </Form>

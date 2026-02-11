@@ -5,7 +5,7 @@ from app.db.models import PaymentStatus
 class DummyPaymentAdapter(PaymentGateway):
     def create_payment_intent(self, amount: int, currency: str, booking_id: int, customer_email: str) -> Dict[str, Any]:
         return {
-            "payment_url": f"http://localhost:8000/dummy-checkout?booking_id={booking_id}&amount={amount}",
+            "payment_url": f"http://localhost:8000/payments/dummy-checkout?booking_id={booking_id}&amount={amount}",
             "transaction_id": f"dummy_txn_{booking_id}"
         }
 

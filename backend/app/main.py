@@ -7,19 +7,18 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Villa Roli Booking Engine")
 
-from fastapi.middleware.cors import CORSMiddleware
+from app.core.logging import setup_logging
+from app.core.config import settings
 
-origins = [
-    "http://localhost:5173",
-    "http://localhost:8080",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:8080",
-]
+# Initialize Logging
+setup_logging()
+
+from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origin_regex="https?://(localhost|127\.0\.0\.1)(:[0-9]+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,6 +36,7 @@ app.include_router(admin_content.router, prefix="/admin/content", tags=["admin-c
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from app.core.exceptions import RuleViolationError
+import logging
 
 @app.exception_handler(RuleViolationError)
 async def rule_violation_handler(request: Request, exc: RuleViolationError):
@@ -49,6 +49,25 @@ async def rule_violation_handler(request: Request, exc: RuleViolationError):
         },
     )
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logging.error(f"Global Exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error_code": "INTERNAL_SERVER_ERROR",
+            "message": "Error interno del servidor",
+            "details": str(exc)
+        },
+    )
+
 @app.get("/")
 def health_check():
     return {"status": "ok", "message": "Booking Engine is running"}
+
+# Startup Events
+from app.core.scheduler import start_scheduler
+
+@app.on_event("startup")
+async def startup_event():
+    start_scheduler()

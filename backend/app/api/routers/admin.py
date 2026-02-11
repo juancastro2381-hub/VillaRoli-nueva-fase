@@ -29,6 +29,14 @@ class BookingResponse(BaseModel):
     guest_phone: Optional[str] = None
     guest_city: Optional[str] = None
     
+    is_override: bool
+    override_reason: Optional[str] = None
+    rules_bypassed: Optional[str] = None
+    
+    # We need to fetch Payment info manually or via relationship
+    # For now, let's assume we can get it from the ORM relationship 'payments'
+    # But Booking model might need to be eager loaded
+    
     class Config:
         from_attributes = True
 
@@ -225,9 +233,38 @@ def download_bookings_report(
             headers={"Content-Disposition": "attachment; filename=reservas.pdf"}
         )
     else:
-        xlsx_content = ReportingService.generate_bookings_xlsx(bookings)
         return Response(
             content=xlsx_content,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=reservas.xlsx"}
         )
+
+@router.post("/bookings/{booking_id}/cancel")
+def cancel_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+        
+    booking.status = BookingStatus.CANCELLED
+    db.commit()
+    return {"status": "cancelled", "id": booking.id}
+
+    booking.status = BookingStatus.CONFIRMED
+    db.commit()
+    return {"status": "confirmed", "id": booking.id}
+
+from app.core.scheduler import expire_stale_bookings
+
+@router.post("/ops/expire-stale")
+def trigger_expiration_job(
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Manually trigger the stale booking expiration job.
+    """
+    expire_stale_bookings()
+    return {"status": "job_triggered", "message": "Stale bookings expiration logic executed."}
