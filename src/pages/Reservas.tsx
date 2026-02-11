@@ -26,7 +26,7 @@ import {
   DEPOSITO_GARANTIA,
   TIPO_RESERVA_LABELS,
   calcularPrecio,
-  validarMinimoPersonas,
+  validarReglasNegocio,
   type TipoReserva,
 } from "@/lib/pricing";
 
@@ -86,13 +86,25 @@ const Reservas = () => {
     return calcularPrecio(tipoReserva as TipoReserva, personas, noches);
   }, [tipoReserva, huespedes, noches]);
 
-  // Validar mínimo de personas (Visual helper, validation is now in Zod schema)
-  const validacionPersonas = useMemo(() => {
-    if (!tipoReserva || !huespedes) return { valido: true, mensaje: "" };
+  // 1. Validar reglas de negocio (Frontend Mirror)
+  const validationResult = useMemo(() => {
+    // Basic checks
+    if (!tipoReserva || !huespedes || !checkin) return { valido: true, mensaje: "" };
+
+    // For non-pasadia, we need checkout
+    if (tipoReserva !== "pasadia" && !checkout) return { valido: true, mensaje: "" };
+
     const personas = parseInt(huespedes);
     if (isNaN(personas)) return { valido: true, mensaje: "" };
-    return validarMinimoPersonas(tipoReserva as TipoReserva, personas);
-  }, [tipoReserva, huespedes]);
+
+    // Call the comprehensive validator
+    return validarReglasNegocio(
+      tipoReserva as TipoReserva,
+      personas,
+      checkin,
+      checkout || checkin // Fallback for pasadia
+    );
+  }, [tipoReserva, huespedes, checkin, checkout]);
 
   const isPasadia = tipoReserva === "pasadia";
 
@@ -669,22 +681,22 @@ const Reservas = () => {
                     </div>
 
                     {/* Validation Alert */}
-                    {!validacionPersonas.valido && (
+                    {!validationResult.valido && (
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
-                        className="mt-6 p-4 bg-orange-500/10 border border-orange-500/30 rounded-xl flex items-start gap-3"
+                        className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 shadow-sm"
                       >
-                        <AlertCircle className="w-5 h-5 text-orange-600 mt-0.5 shrink-0" />
+                        <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
                         <div className="text-sm">
-                          <p className="font-semibold text-orange-700 mb-1">Requisito de Reserva</p>
-                          <p className="text-orange-800/80">{validacionPersonas.mensaje}</p>
+                          <p className="font-semibold text-red-700 mb-1">Corrección Requerida</p>
+                          <p className="text-red-800/80">{validationResult.mensaje}</p>
                         </div>
                       </motion.div>
                     )}
 
                     {/* Price Calculator */}
-                    {precioCalculado && validacionPersonas.valido && (
+                    {precioCalculado && validationResult.valido && (
                       <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -751,7 +763,7 @@ const Reservas = () => {
                     type="submit"
                     size="lg"
                     className="w-full font-semibold py-6 text-lg gap-3"
-                    disabled={isSubmitting || !validacionPersonas.valido}
+                    disabled={isSubmitting || !validationResult.valido}
                   >
                     <MessageCircle size={22} />
                     {isSubmitting ? "Abriendo Reservas..." : "Realizar Reserva"}
