@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar, Users, Home, Info, MessageCircle, Sun, UserCheck, Moon, CheckCircle, AlertCircle, Shield } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import fincaPiscinaNoche from "@/assets/finca-piscina-noche2.jpg";
 import { AvailabilityCalendar } from "@/components/ui/AvailabilityCalendar";
@@ -111,7 +111,18 @@ const Reservas = () => {
   // Opciones de personas según tipo de reserva
   const personasOptions = useMemo(() => {
     if (tipoReserva === "plan-familia") return [1, 2, 3, 4, 5];
+
+    // Day pass can be large groups
     if (tipoReserva === "pasadia") return Array.from({ length: 100 }, (_, i) => i + 1);
+
+    // Full Property Plans (Weekday, Weekend, Holiday) require Min 10
+    // Backend/Pricing rule: Min 10. Max Capacity: 37.
+    if (["noches-entre-semana", "noches-fin-semana", "noches-festivo"].includes(tipoReserva)) {
+      // Generate range 10 to 37
+      return Array.from({ length: 37 - 9 }, (_, i) => i + 10);
+    }
+
+    // Default fallback (should effectively be unreachable if all types covered above, but safe to keep)
     return Array.from({ length: 37 }, (_, i) => i + 1);
   }, [tipoReserva]);
 
@@ -138,11 +149,127 @@ const Reservas = () => {
   const [showPaymentSelection, setShowPaymentSelection] = useState(false);
   const [formData, setFormData] = useState<ReservationFormValues | null>(null);
 
+  // Availability Check State
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
+
+  // Debounced Availability Check
+  useEffect(() => {
+    // Reset error when inputs change (optimistic)
+    setAvailabilityError(null);
+
+    if (!checkin) return;
+
+    // Determine effective dates
+    const effectiveCheckIn = checkin;
+    const effectiveCheckOut = tipoReserva === "pasadia" ? checkin : checkout;
+
+    if (!effectiveCheckOut) return;
+
+    // Validate dates locally first (don't spam backend with invalid ranges)
+    if (new Date(effectiveCheckIn) < new Date().setHours(0, 0, 0, 0) as any) return;
+    if (tipoReserva !== "pasadia" && effectiveCheckIn >= effectiveCheckOut) return;
+
+    const timer = setTimeout(async () => {
+      setIsCheckingAvailability(true);
+      try {
+        const query = new URLSearchParams({
+          check_in: effectiveCheckIn,
+          check_out: effectiveCheckOut,
+          property_id: "1"
+        });
+
+        const res = await fetch(`http://localhost:8000/bookings/availability?${query}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.available === false) {
+            setAvailabilityError("Las fechas seleccionadas no están disponibles. Por favor elige otras.");
+          } else {
+            setAvailabilityError(null);
+          }
+        }
+      } catch (err) {
+        console.error("Availability check failed", err);
+        // We don't block the user on network error here, let the main submit handle it
+      } finally {
+        setIsCheckingAvailability(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timer);
+  }, [checkin, checkout, tipoReserva]);
+
   const onSubmit = async (data: ReservationFormValues) => {
-    // 1. Validate form local (Zod does this)
-    // 2. Move to Payment Selection
+    console.log("🔍 onSubmit called with data:", data);
+
+    // 1. Safety Check: Re-run validation before proceeding
+    const validation = validarReglasNegocio(
+      data.tipoReserva as TipoReserva,
+      parseInt(data.huespedes),
+      data.checkin,
+      data.checkout || data.checkin
+    );
+
+    console.log("📋 Validation result:", validation);
+
+    if (!validation.valido) {
+      console.warn("❌ BLOCKED: Business rule validation failed:", validation.mensaje);
+      // Error already shown inline, just block submission
+      return;
+    }
+
+    // 2. BLOCKING Availability Check (Final Safety Net)
+    // This prevents ANY plan from reaching payment with unavailable dates
+    if (availabilityError) {
+      console.warn("❌ BLOCKED: Availability error present:", availabilityError);
+      // Error already shown inline, just block submission
+      return;
+    }
+
+    // 3. Final blocking availability query (synchronous check before proceeding)
+    console.log("🔄 Starting final availability check...");
+    setIsSubmitting(true);
+    try {
+      const effectiveCheckIn = data.checkin;
+      const effectiveCheckOut = data.tipoReserva === "pasadia" ? data.checkin : (data.checkout || data.checkin);
+
+      const query = new URLSearchParams({
+        check_in: effectiveCheckIn,
+        check_out: effectiveCheckOut,
+        property_id: "1"
+      });
+
+      const availabilityRes = await fetch(`http://localhost:8000/bookings/availability?${query}`);
+
+      if (availabilityRes.ok) {
+        const availabilityData = await availabilityRes.json();
+        console.log("📡 Availability response:", availabilityData);
+
+        if (availabilityData.available === false) {
+          console.warn("❌ BLOCKED: Dates unavailable");
+          // Set error for inline display, no toast
+          setAvailabilityError("Las fechas seleccionadas no están disponibles. Por favor elige otras.");
+          setIsSubmitting(false);
+          return;
+        }
+      }
+    } catch (err) {
+      // Network/technical error - toast is appropriate here
+      console.error("Final availability check failed", err);
+      toast({
+        variant: "destructive",
+        title: "Error de conexión",
+        description: "No pudimos verificar la disponibilidad. Verifica tu conexión a internet."
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    // 4. Move to Payment Selection (All validations passed)
+    console.log("✅ ALL VALIDATIONS PASSED - Transitioning to payment screen");
     setFormData(data);
     setShowPaymentSelection(true);
+    setIsSubmitting(false);
     toast({
       title: "Paso 1 completado",
       description: "Ahora selecciona tu método de pago.",
@@ -190,7 +317,14 @@ const Reservas = () => {
       if (!response.ok) {
         let errorMessage = "No pudimos procesar tu solicitud.";
 
-        // Handle Logic Errors (422/409 with error_code)
+        if (result.error_code === "OverbookingError" || result.error_code === "OVERBOOKING_NOT_ALLOWED" || response.status === 409) {
+          // Map 409 to same frontend availability error (consistency)
+          setAvailabilityError("Las fechas seleccionadas no están disponibles. Por favor elige otras.");
+          setShowPaymentSelection(false); // Go back to form
+          setIsSubmitting(false);
+          return;
+        }
+
         if (result.error_code) {
           errorMessage = translateError(result.error_code);
         }
@@ -254,6 +388,44 @@ const Reservas = () => {
   };
 
   if (showPaymentSelection && formData && precioCalculado) {
+    // DEFENSIVE CHECK: Validate before showing payment screen
+    // This prevents UI desync edge cases
+    const defensiveValidation = validarReglasNegocio(
+      formData.tipoReserva as TipoReserva,
+      parseInt(formData.huespedes),
+      formData.checkin,
+      formData.checkout || formData.checkin
+    );
+
+    console.log("🛡️ DEFENSIVE CHECK at payment screen render:", {
+      formData,
+      validationResult: defensiveValidation
+    });
+
+    if (!defensiveValidation.valido) {
+      // Critical: Business rule violation detected at payment screen
+      // Reset to form and show error inline
+      console.error("🚨 CRITICAL: Invalid booking state at payment screen. Resetting to form.");
+      console.error("🚨 Error:", defensiveValidation.mensaje);
+      setShowPaymentSelection(false);
+      setFormData(null);
+      // The inline alert will show automatically via validationResult
+      // No need for toast - user will see the inline error
+      return (
+        <Layout>
+          <div className="section-padding bg-gray-50 min-h-[60vh] flex items-center justify-center">
+            <div className="container-custom max-w-3xl text-center">
+              <AlertCircle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold mb-2">Redirigiendo...</h2>
+              <p className="text-muted-foreground">Por favor completa el formulario correctamente.</p>
+            </div>
+          </div>
+        </Layout>
+      );
+    }
+
+    console.log("✅ Payment screen validation passed");
+
     return (
       <Layout>
         <div className="section-padding bg-gray-50 min-h-[60vh]">
@@ -695,8 +867,35 @@ const Reservas = () => {
                       </motion.div>
                     )}
 
+                    {/* Availability Checking Indicator */}
+                    {isCheckingAvailability && !availabilityError && validationResult.valido && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        className="mt-6 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3"
+                      >
+                        <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                        <p className="text-sm text-blue-800">Verificando disponibilidad...</p>
+                      </motion.div>
+                    )}
+
+                    {/* Availability Error Alert */}
+                    {availabilityError && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        className="mt-6 p-4 bg-red-100 border border-red-300 rounded-xl flex items-start gap-3 shadow-md"
+                      >
+                        <AlertCircle className="w-5 h-5 text-red-700 mt-0.5 shrink-0" />
+                        <div className="text-sm">
+                          <p className="font-semibold text-red-800 mb-1">Fechas no disponibles</p>
+                          <p className="text-red-900/80">{availabilityError}</p>
+                        </div>
+                      </motion.div>
+                    )}
+
                     {/* Price Calculator */}
-                    {precioCalculado && validationResult.valido && (
+                    {precioCalculado && validationResult.valido && !availabilityError && (
                       <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -763,10 +962,10 @@ const Reservas = () => {
                     type="submit"
                     size="lg"
                     className="w-full font-semibold py-6 text-lg gap-3"
-                    disabled={isSubmitting || !validationResult.valido}
+                    disabled={isSubmitting || !validationResult.valido || !!availabilityError || isCheckingAvailability}
                   >
                     <MessageCircle size={22} />
-                    {isSubmitting ? "Abriendo Reservas..." : "Realizar Reserva"}
+                    {isCheckingAvailability ? "Verificando disponibilidad..." : (isSubmitting ? "Abriendo Reservas..." : "Realizar Reserva")}
                   </Button>
                 </form>
               </Form>

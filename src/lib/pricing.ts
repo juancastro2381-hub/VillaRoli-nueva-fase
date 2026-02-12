@@ -198,18 +198,15 @@ export const HOLIDAYS_2026 = [
   "2026-11-16", "2026-12-08", "2026-12-25"
 ];
 
-// Helper: Get dates between range
+// Helper: Get dates between range (inclusive start, exclusive end)
 const getDatesInRange = (startStr: string, endStr: string): string[] => {
   const dates: string[] = [];
-  const start = new Date(startStr);
-  const end = new Date(endStr);
-  // Normalize to UTC/No Time
-  start.setHours(0, 0, 0, 0);
-  end.setHours(0, 0, 0, 0);
+  const start = new Date(startStr + "T00:00:00");
+  const end = new Date(endStr + "T00:00:00");
 
-  // Logic: Iterate until < end (exclusive for nights logic check, but let's be careful)
+  // Logic: Iterate until < end (exclusive for nights logic check)
   // Backend logic yields [start, end).
-  // Frontend logic usually needs to check the NIGHTS. Use same logic as backend.
+  // Frontend logic checks the NIGHTS booked.
   const current = new Date(start);
   while (current < end) {
     dates.push(current.toISOString().split('T')[0]);
@@ -232,6 +229,26 @@ export interface ValidationResult {
   mensaje: string;
 }
 
+// Helper: Get the relevant "Sunday" for a date to determine the weekend window (Thu-Mon)
+const getWeekendSunday = (d: Date): Date => {
+  const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const sunday = new Date(d);
+
+  if (day === 0) { // Sun
+    // It is the sunday
+  } else if (day === 1) { // Mon -> belong to previous weekend
+    sunday.setDate(d.getDate() - 1);
+  } else if (day >= 4) { // Thu(4), Fri(5), Sat(6) -> belong to upcoming weekend
+    sunday.setDate(d.getDate() + (7 - day) % 7); // 4->+3(Sun), 5->+2, 6->+1
+  } else {
+    // Tue(2), Wed(3) -> No valid weekend context for this logic usually, 
+    // but let's default to next sunday to fail validation gracefully later
+    sunday.setDate(d.getDate() + (7 - day) % 7);
+  }
+  sunday.setHours(0, 0, 0, 0);
+  return sunday;
+};
+
 export function validarReglasNegocio(
   tipo: TipoReserva,
   personas: number,
@@ -240,7 +257,7 @@ export function validarReglasNegocio(
 ): ValidationResult {
   if (!checkin || !checkout || !tipo || !personas) return { valido: true, mensaje: "" };
 
-  const start = new Date(checkin + "T00:00:00"); // Force local date interpretation
+  const start = new Date(checkin + "T00:00:00");
   const end = new Date(checkout + "T00:00:00");
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -255,7 +272,7 @@ export function validarReglasNegocio(
     if (checkin !== checkout) {
       return { valido: false, mensaje: "El plan Pasadía es de un solo día (Llegada = Salida)." };
     }
-    return { valido: true, mensaje: "" }; // Pasadía valid
+    return { valido: true, mensaje: "" };
   }
 
   // 3. Min Nights (General)
@@ -273,7 +290,7 @@ export function validarReglasNegocio(
 
       for (const dateStr of nights) {
         const d = new Date(dateStr + "T00:00:00");
-        const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+        const day = d.getDay();
         // Allowed: Mon(1), Tue(2), Wed(3), Thu(4)
         if (day === 0 || day === 5 || day === 6) {
           return { valido: false, mensaje: "Este plan solo se puede reservar de lunes a jueves." };
@@ -281,33 +298,88 @@ export function validarReglasNegocio(
       }
       break;
 
-    case "noches-fin-semana": // Fri, Sat. No Holidays.
+    case "noches-fin-semana": // Weekend Standard: Any combination of Fri/Sat/Sun nights
       if (personas < 10) return { valido: false, mensaje: "Se requiere un mínimo de 10 personas para este plan." };
-      if (holidays.length > 0) return { valido: false, mensaje: "Este plan no está permitido en fechas festivas." };
+
+      // Block if any holiday is present
+      if (holidays.length > 0) {
+        return {
+          valido: false,
+          mensaje: "Hay un festivo en tus fechas. Debes seleccionar el plan 'Finca Completa - Festivo'."
+        };
+      }
+
+      // Night-based validation: All nights must be Friday(5), Saturday(6), or Sunday(0)
+      // Valid combinations:
+      // - Fri only: Fri→Sat
+      // - Sat only: Sat→Sun
+      // - Sun only: Sun→Mon
+      // - Fri+Sat: Fri→Sun
+      // - Sat+Sun: Sat→Mon
+      // - Fri+Sat+Sun: Fri→Mon
 
       for (const dateStr of nights) {
         const d = new Date(dateStr + "T00:00:00");
         const day = d.getDay();
-        // Allowed: Fri(5), Sat(6)
-        // If Sunday night (0) is included, it's usually weird for "weekend standard" unless checking out Monday.
-        // Backend says: Allowed nights must be Fri(4 in Python? No 4=Fri) or Sat.
-        // JS: 5=Fri, 6=Sat.
-        if (day !== 5 && day !== 6) {
-          return { valido: false, mensaje: "El plan Fin de Semana Estándar requiere noches de viernes o sábado." };
+        // Only Friday(5), Saturday(6), or Sunday(0) nights are allowed
+        if (day !== 5 && day !== 6 && day !== 0) {
+          return {
+            valido: false,
+            mensaje: "El plan Fin de Semana Estándar solo permite noches de viernes, sábado o domingo."
+          };
         }
       }
       break;
 
-    case "noches-festivo": // Weekend + Holiday
+    case "noches-festivo": // Extended Holiday Window (Thu-Mon)
+      // 1. Min People
       if (personas < 10) return { valido: false, mensaje: "Se requiere un mínimo de 10 personas para este plan." };
 
-      // Must include a holiday OR end on a holiday monday
-      const hasHolidayNight = holidays.length > 0;
-      const checkoutDate = new Date(checkout + "T00:00:00");
-      const checkoutIsHolidayMonday = (checkoutDate.getDay() === 1 && HOLIDAYS_2026.includes(checkout));
+      // 2. Max 4 nights (Thu-Mon = 4 nights max)
+      if (nights.length > 4) return { valido: false, mensaje: "El plan Festivo permite máximo 4 noches (Jueves a Lunes)." };
 
-      if (!hasHolidayNight && !checkoutIsHolidayMonday) {
-        return { valido: false, mensaje: "Este plan requiere un fin de semana con festivo." };
+      // 3. Holiday Validation (Context-Aware)
+      // Requirement: Accept ANY days (Thu, Fri, Sat, Sun, Mon) IF the weekend is a "Holiday Weekend".
+      // Users can book Fri-Sat, Sat-Sun, Sun-Mon, etc., even if they don't touch the holiday date itself,
+      // AS LONG AS the holiday exists in the surrounding weekend context (Thu-Mon).
+
+      // Helper to format date safely (Local YYYY-MM-DD)
+      const toLocalYMD = (d: Date) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
+      // Identify the "Anchor Sunday" of the weekend
+      const anchorSunday = getWeekendSunday(start);
+
+      // Define the "Holiday Window" (Thu -> Mon)
+      const thuDate = new Date(anchorSunday); thuDate.setDate(anchorSunday.getDate() - 3);
+      const monDate = new Date(anchorSunday); monDate.setDate(anchorSunday.getDate() + 1);
+
+      const windowStartStr = toLocalYMD(thuDate);
+      const windowEndStr = toLocalYMD(monDate);
+
+      // Check if ANY holiday exists in this Thu-Mon window
+      const isHolidayWeekend = HOLIDAYS_2026.some(h => h >= windowStartStr && h <= windowEndStr);
+
+      if (!isHolidayWeekend) {
+        return {
+          valido: false,
+          mensaje: "Este plan requiere que el fin de semana seleccionado tenga un día festivo."
+        };
+      }
+
+      // 4. Day of Week Logic (Thu-Mon ONLY)
+      // Allowed nights: Thu(4), Fri(5), Sat(6), Sun(0), Mon(1).
+      // Disallowed: Tue(2), Wed(3).
+      for (const dateStr of nights) {
+        const d = new Date(dateStr + "T00:00:00");
+        const day = d.getDay();
+        if (day === 2 || day === 3) { // Tue, Wed
+          return { valido: false, mensaje: "El plan Festivo está diseñado para fines de semana largos (Jueves a Lunes)." };
+        }
       }
       break;
 
