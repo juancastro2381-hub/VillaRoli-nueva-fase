@@ -26,26 +26,7 @@ class Settings(BaseSettings):
     PENDING_TIMEOUT_MINUTES: int = 60
     
     # Business Logic
-    HOLIDAYS_2026: Set[date] = {
-        date(2026, 1, 1),   # Año Nuevo
-        date(2026, 1, 12),  # Reyes Magos (Lun)
-        date(2026, 3, 23),  # San José (Lun)
-        date(2026, 4, 2),   # Jueves Santo
-        date(2026, 4, 3),   # Viernes Santo
-        date(2026, 5, 1),   # Día del Trabajo (Vie)
-        date(2026, 5, 18),  # Ascensión del Señor (Lun)
-        date(2026, 6, 8),   # Corpus Christi (Lun)
-        date(2026, 6, 15),  # Sagrado Corazón (Lun)
-        date(2026, 6, 29),  # San Pedro y San Pablo (Lun)
-        date(2026, 7, 20),  # Día de la Independencia (Lun)
-        date(2026, 8, 7),   # Batalla de Boyacá (Vie)
-        date(2026, 8, 17),  # Asunción de la Virgen (Lun)
-        date(2026, 10, 12), # Día de la Raza (Lun)
-        date(2026, 11, 2),  # Todos los Santos (Lun)
-        date(2026, 11, 16), # Independencia de Cartagena (Lun)
-        date(2026, 12, 8),  # Inmaculada Concepción (Mar)
-        date(2026, 12, 25), # Navidad (Vie)
-    }
+    # Holidays are now managed by CalendarService
 
     model_config = SettingsConfigDict(
         env_file=".env", 

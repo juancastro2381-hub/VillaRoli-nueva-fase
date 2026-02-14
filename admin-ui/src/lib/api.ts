@@ -1,7 +1,10 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: '/', // Proxied by Vite to http://localhost:8001
+    baseURL: '/api', // Use relative path for proxy
+    headers: {
+        'Content-Type': 'application/json',
+    },
 });
 
 api.interceptors.request.use(

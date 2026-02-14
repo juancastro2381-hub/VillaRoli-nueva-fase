@@ -29,6 +29,7 @@ import {
   validarReglasNegocio,
   type TipoReserva,
 } from "@/lib/pricing";
+import { fetchHolidayContext, type HolidayContext } from "@/lib/calendar";
 
 // Form imports
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -69,6 +70,10 @@ const Reservas = () => {
   const tipoReserva = form.watch("tipoReserva") as TipoReserva | "";
   const huespedes = form.watch("huespedes");
 
+  // Holiday Context State (from API) - MUST be before validationResult useMemo
+  const [holidayContext, setHolidayContext] = useState<HolidayContext | null>(null);
+  const [isLoadingHolidays, setIsLoadingHolidays] = useState(false);
+
   // Calcular noches
   const noches = useMemo(() => {
     if (!checkin || !checkout) return 1;
@@ -86,6 +91,14 @@ const Reservas = () => {
     return calcularPrecio(tipoReserva as TipoReserva, personas, noches);
   }, [tipoReserva, huespedes, noches]);
 
+  // Adapter for pricing logic (API snake_case -> Pricing camelCase)
+  const pricingContext = useMemo(() => holidayContext ? {
+    hasHolidayInWindow: holidayContext.has_holiday_in_window,
+    holidays: holidayContext.holidays_in_window || [],
+    holidays_in_range: holidayContext.holidays_in_range || [],
+    holidays_in_window: holidayContext.holidays_in_window || []
+  } : undefined, [holidayContext]);
+
   // 1. Validar reglas de negocio (Frontend Mirror)
   const validationResult = useMemo(() => {
     // Basic checks
@@ -97,14 +110,15 @@ const Reservas = () => {
     const personas = parseInt(huespedes);
     if (isNaN(personas)) return { valido: true, mensaje: "" };
 
-    // Call the comprehensive validator
+    // Pass detailed holiday context to validator
     return validarReglasNegocio(
       tipoReserva as TipoReserva,
       personas,
       checkin,
-      checkout || checkin // Fallback for pasadia
+      checkout || checkin, // Fallback for pasadia
+      pricingContext
     );
-  }, [tipoReserva, huespedes, checkin, checkout]);
+  }, [tipoReserva, huespedes, checkin, checkout, pricingContext]);
 
   const isPasadia = tipoReserva === "pasadia";
 
@@ -134,7 +148,7 @@ const Reservas = () => {
       "MIN_NIGHTS_REQUIRED": "Este plan requiere mínimo una noche de estadía.",
       "DAY_PASS_INVALID_RANGE": "El plan Pasadía solo permite seleccionar una sola fecha. Por favor elige un solo día.",
       "MIN_PEOPLE_NOT_MET": "Este plan requiere un mínimo de personas (10 para Finca Completa).",
-      "INVALID_WEEKDAY_DATES": "La Finca Completa entre semana solo se puede reservar de lunes a jueves.",
+      "INVALID_WEEKDAY_DATES": "La Finca Completa entre semana solo se puede reservar de lunes a jueves (noches de lun, mar, mie, jue).",
       "INVALID_WEEKEND_DATES": "El plan Fin de Semana es Viernes a Domingo (noches de viernes y sábado).",
       "HOLIDAY_REQUIRED": "Este plan solo aplica para fines de semana que tengan un día festivo asociado.",
       "PLAN_NOT_ALLOWED_ON_HOLIDAY": "Este plan no está permitido en fechas festivas.",
@@ -152,6 +166,7 @@ const Reservas = () => {
   // Availability Check State
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
+  const [holidayFetchError, setHolidayFetchError] = useState(false);
 
   // Debounced Availability Check
   useEffect(() => {
@@ -167,7 +182,7 @@ const Reservas = () => {
     if (!effectiveCheckOut) return;
 
     // Validate dates locally first (don't spam backend with invalid ranges)
-    if (new Date(effectiveCheckIn) < new Date().setHours(0, 0, 0, 0) as any) return;
+    if (new Date(effectiveCheckIn).getTime() < new Date().setHours(0, 0, 0, 0)) return;
     if (tipoReserva !== "pasadia" && effectiveCheckIn >= effectiveCheckOut) return;
 
     const timer = setTimeout(async () => {
@@ -199,37 +214,102 @@ const Reservas = () => {
     return () => clearTimeout(timer);
   }, [checkin, checkout, tipoReserva]);
 
+  // Fetch Holiday Context from API for Festivo plan
+  useEffect(() => {
+    // (e.g. Weekday plan must block holidays)
+    if (!tipoReserva) {
+      setHolidayContext(null);
+      return;
+    }
+
+    if (!checkin || !checkout) {
+      setHolidayContext(null);
+      return;
+    }
+
+    const fetchHolidays = async () => {
+      setIsLoadingHolidays(true);
+      setHolidayFetchError(false); // Reset error state
+      try {
+        const context = await fetchHolidayContext(checkin, checkout);
+        if (!context) {
+          console.warn("Holiday context returned null");
+          setHolidayFetchError(true);
+        }
+        setHolidayContext(context);
+      } catch (err) {
+        console.error("Failed to fetch holiday context", err);
+        setHolidayFetchError(true);
+        setHolidayContext(null);
+      } finally {
+        setIsLoadingHolidays(false);
+      }
+    };
+
+    fetchHolidays();
+  }, [checkin, checkout, tipoReserva]);
+
   const onSubmit = async (data: ReservationFormValues) => {
     console.log("🔍 onSubmit called with data:", data);
 
-    // 1. Safety Check: Re-run validation before proceeding
-    const validation = validarReglasNegocio(
-      data.tipoReserva as TipoReserva,
-      parseInt(data.huespedes),
-      data.checkin,
-      data.checkout || data.checkin
-    );
-
-    console.log("📋 Validation result:", validation);
-
-    if (!validation.valido) {
-      console.warn("❌ BLOCKED: Business rule validation failed:", validation.mensaje);
-      // Error already shown inline, just block submission
+    // 0. Loading Gate: Prevent submit if holidays are still loading (initial load)
+    if (isLoadingHolidays) {
       return;
     }
 
-    // 2. BLOCKING Availability Check (Final Safety Net)
-    // This prevents ANY plan from reaching payment with unavailable dates
-    if (availabilityError) {
-      console.warn("❌ BLOCKED: Availability error present:", availabilityError);
-      // Error already shown inline, just block submission
-      return;
-    }
-
-    // 3. Final blocking availability query (synchronous check before proceeding)
-    console.log("🔄 Starting final availability check...");
     setIsSubmitting(true);
+
     try {
+      // 1. BLOCKING DATA FETCH: Get fresh holiday context
+      // We do not rely on state here to avoid race conditions.
+      // We treat the backend as the single source of truth at the moment of submission.
+      const freshHolidayContext = await fetchHolidayContext(
+        data.checkin,
+        data.checkout || data.checkin
+      );
+
+      // Update state to keep UI in sync, but don't wait for re-render
+      setHolidayContext(freshHolidayContext);
+
+      const currentPricingContext = freshHolidayContext ? {
+        hasHolidayInWindow: freshHolidayContext.has_holiday_in_window,
+        holidays: freshHolidayContext.holidays_in_window || [],
+        holidays_in_range: freshHolidayContext.holidays_in_range || [],
+        holidays_in_window: freshHolidayContext.holidays_in_window || []
+      } : undefined;
+
+      // 2. Safety Check: Run validation with FRESH context
+      const validation = validarReglasNegocio(
+        data.tipoReserva as TipoReserva,
+        parseInt(data.huespedes),
+        data.checkin,
+        data.checkout || data.checkin,
+        currentPricingContext // Use fresh mapped context
+      );
+
+      console.log("📋 Validation result (Fresh Context):", validation);
+
+      if (!validation.valido) {
+        console.warn("❌ BLOCKED: Business rule validation failed:", validation.mensaje);
+        toast({
+          variant: "destructive",
+          title: "Reserva no válida",
+          description: validation.mensaje
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 3. BLOCKING Availability Check (Final Safety Net)
+      if (availabilityError) {
+        console.warn("❌ BLOCKED: Availability error present:", availabilityError);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 4. Final blocking availability query (synchronous check)
+      console.log("🔄 Starting final availability check...");
+
       const effectiveCheckIn = data.checkin;
       const effectiveCheckOut = data.tipoReserva === "pasadia" ? data.checkin : (data.checkout || data.checkin);
 
@@ -247,33 +327,31 @@ const Reservas = () => {
 
         if (availabilityData.available === false) {
           console.warn("❌ BLOCKED: Dates unavailable");
-          // Set error for inline display, no toast
           setAvailabilityError("Las fechas seleccionadas no están disponibles. Por favor elige otras.");
           setIsSubmitting(false);
           return;
         }
       }
+
+      // 5. Move to Payment Selection (All validations passed)
+      console.log("✅ ALL VALIDATIONS PASSED - Transitioning to payment screen");
+      setFormData(data);
+      setShowPaymentSelection(true);
+      setIsSubmitting(false);
+      toast({
+        title: "Paso 1 completado",
+        description: "Ahora selecciona tu método de pago.",
+      });
+
     } catch (err) {
-      // Network/technical error - toast is appropriate here
-      console.error("Final availability check failed", err);
+      console.error("Submission process failed", err);
       toast({
         variant: "destructive",
-        title: "Error de conexión",
-        description: "No pudimos verificar la disponibilidad. Verifica tu conexión a internet."
+        title: "Error",
+        description: "Ocurrió un error al procesar tu solicitud. Intenta nuevamente."
       });
       setIsSubmitting(false);
-      return;
     }
-
-    // 4. Move to Payment Selection (All validations passed)
-    console.log("✅ ALL VALIDATIONS PASSED - Transitioning to payment screen");
-    setFormData(data);
-    setShowPaymentSelection(true);
-    setIsSubmitting(false);
-    toast({
-      title: "Paso 1 completado",
-      description: "Ahora selecciona tu método de pago.",
-    });
   };
 
   const handleFinalizeReservation = async (method: string, type: string) => {
@@ -338,11 +416,10 @@ const Reservas = () => {
         }
 
         console.error("❌ Booking Failed:", errorMessage);
-        toast({
-          variant: "destructive",
-          title: "Error en la reserva",
-          description: errorMessage,
-        });
+        // CRITICAL: DO NOT show toast in payment screen.
+        // Silent redirect to form where inline error will show.
+        setShowPaymentSelection(false);
+        setFormData(null);
         setIsSubmitting(false);
         return;
       }
@@ -390,34 +467,40 @@ const Reservas = () => {
   if (showPaymentSelection && formData && precioCalculado) {
     // DEFENSIVE CHECK: Validate before showing payment screen
     // This prevents UI desync edge cases
+
+    // Ensure we map the context correctly again
+    const currentPricingContext = holidayContext ? {
+      hasHolidayInWindow: holidayContext.has_holiday_in_window,
+      holidays: holidayContext.holidays_in_window || [],
+      holidays_in_range: holidayContext.holidays_in_range || [],
+      holidays_in_window: holidayContext.holidays_in_window || []
+    } : undefined;
+
     const defensiveValidation = validarReglasNegocio(
       formData.tipoReserva as TipoReserva,
       parseInt(formData.huespedes),
       formData.checkin,
-      formData.checkout || formData.checkin
+      formData.checkout || formData.checkin,
+      currentPricingContext // Ensure WE PASS CONTEXT
     );
-
-    console.log("🛡️ DEFENSIVE CHECK at payment screen render:", {
-      formData,
-      validationResult: defensiveValidation
-    });
 
     if (!defensiveValidation.valido) {
       // Critical: Business rule violation detected at payment screen
-      // Reset to form and show error inline
-      console.error("🚨 CRITICAL: Invalid booking state at payment screen. Resetting to form.");
-      console.error("🚨 Error:", defensiveValidation.mensaje);
+      console.warn("🛡️ PAYMENT GUARD BLOCKED: Invalid state detected.", {
+        reason: defensiveValidation.mensaje,
+        context: currentPricingContext
+      });
       setShowPaymentSelection(false);
       setFormData(null);
       // The inline alert will show automatically via validationResult
-      // No need for toast - user will see the inline error
       return (
         <Layout>
           <div className="section-padding bg-gray-50 min-h-[60vh] flex items-center justify-center">
             <div className="container-custom max-w-3xl text-center">
               <AlertCircle className="w-16 h-16 text-red-600 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold mb-2">Redirigiendo...</h2>
-              <p className="text-muted-foreground">Por favor completa el formulario correctamente.</p>
+              <h2 className="text-2xl font-bold mb-2">Reserva no válida</h2>
+              <p className="text-muted-foreground mb-4">{defensiveValidation.mensaje}</p>
+              <p className="text-sm text-gray-400">Redirigiendo al formulario...</p>
             </div>
           </div>
         </Layout>
@@ -852,8 +935,8 @@ const Reservas = () => {
                       )}
                     </div>
 
-                    {/* Validation Alert */}
-                    {!validationResult.valido && (
+                    {/* Validation Alert - Only show in form, not in payment screen */}
+                    {!showPaymentSelection && !validationResult.valido && (
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
@@ -960,11 +1043,9 @@ const Reservas = () => {
 
                   <Button
                     type="submit"
-                    size="lg"
-                    className="w-full font-semibold py-6 text-lg gap-3"
-                    disabled={isSubmitting || !validationResult.valido || !!availabilityError || isCheckingAvailability}
+                    className="w-full bg-gold hover:bg-gold/90 text-primary-foreground font-semibold py-6 text-lg shadow-lg hover:shadow-xl transition-all duration-300"
+                    disabled={isSubmitting || isLoadingHolidays || !validationResult.valido || !!availabilityError || isCheckingAvailability}
                   >
-                    <MessageCircle size={22} />
                     {isCheckingAvailability ? "Verificando disponibilidad..." : (isSubmitting ? "Abriendo Reservas..." : "Realizar Reserva")}
                   </Button>
                 </form>

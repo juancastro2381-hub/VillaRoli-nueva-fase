@@ -1,174 +1,180 @@
-
-import { useQuery } from '@tanstack/react-query';
-import api from '../lib/api';
-import { LogOut, LayoutDashboard, MessageSquare, Quote, FileText, Plus, X, Menu } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import BookingsTable from '../components/BookingsTable';
-import ContentMessages from './ContentMessages';
-import ContentTestimonials from './ContentTestimonials';
-import ContentBlog from './ContentBlog';
-import { useState } from 'react';
-import ManualBookingForm from '../components/ManualBookingForm';
+import { useEffect, useState } from "react";
+import api from "../lib/api";
+import { KPICards } from "../components/admin/KPICards";
+import { ReservationsTable } from "../components/admin/ReservationsTable";
+import { BookingDetailModal } from "../components/admin/BookingDetailModal";
+import { Button } from "../components/ui/button";
+import { FileDown, RefreshCw } from "lucide-react";
 
 interface Booking {
     id: number;
     guest_name: string;
     guest_email: string;
+    guest_phone: string;
+    guest_city?: string;
     check_in: string;
     check_out: string;
     status: string;
     guest_count: number;
-    property_id: number;
+    total_amount: number;
+    payment_method?: string;
+    payment_status?: string;
+    created_at?: string;
     is_override: boolean;
     override_reason?: string;
 }
 
-export default function Dashboard() {
-    const navigate = useNavigate();
+interface KPIStats {
+    total_bookings: number;
+    monthly_revenue: number;
+    active_bookings: number;
+    occupancy_rate: number;
+}
 
-    const [activeTab, setActiveTab] = useState<'bookings' | 'messages' | 'testimonials' | 'blog'>('bookings');
-    const [showManualModal, setShowManualModal] = useState(false);
-    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-    const { data: bookings, isLoading, error } = useQuery<Booking[]>({
-        queryKey: ['bookings'],
-        queryFn: async () => {
-            const res = await api.get('/admin/bookings');
-            return res.data;
-        },
-        enabled: activeTab === 'bookings'
+const Dashboard = () => {
+    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [kpis, setKpis] = useState<KPIStats>({
+        total_bookings: 0,
+        monthly_revenue: 0,
+        active_bookings: 0,
+        occupancy_rate: 0
     });
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        navigate('/login');
+    useEffect(() => {
+        loadDashboardData();
+    }, []);
+
+    const loadDashboardData = () => {
+        setIsLoading(true);
+        setError(null);
+        Promise.all([fetchBookings(), fetchKPIs()])
+            .catch(e => {
+                console.error("Dashboard data error:", e);
+                if (!error) setError("Ocurrió un error al cargar los datos. Verifica tu conexión.");
+            })
+            .finally(() => setIsLoading(false));
     };
 
-    const renderContent = () => {
-        if (isLoading && activeTab === 'bookings') {
-            return <div className="p-8 flex justify-center"><div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent"></div></div>;
+    const fetchBookings = async () => {
+        try {
+            // Using public endpoint for development - switch to /admin/bookings when auth is configured
+            const res = await api.get("/admin/bookings/public");
+            setBookings(res.data);
+        } catch (e: any) {
+            console.error("Failed to fetch bookings:", e);
+            setError("Error al cargar las reservas. Verifica que el backend esté corriendo.");
+            throw e;
         }
-        if (error && activeTab === 'bookings') {
-            return <div className="p-8 text-red-500 bg-red-50 rounded-lg">Error loading data. Please login again.</div>;
-        }
+    };
 
-        switch (activeTab) {
-            case 'bookings':
-                return <BookingsTable bookings={bookings || []} />;
-            case 'messages':
-                return <ContentMessages />;
-            case 'testimonials':
-                return <ContentTestimonials />;
-            case 'blog':
-                return <ContentBlog />;
-            default:
-                return null;
+    const fetchKPIs = async () => {
+        try {
+            // Using public endpoint for development - switch to /admin/kpis when auth is configured
+            const res = await api.get("/admin/kpis/public");
+            setKpis(res.data);
+        } catch (e: any) {
+            console.error("Failed to load KPIs:", e);
+            setError("Error al cargar los KPIs. Verifica que el backend esté corriendo.");
+        }
+    };
+
+    const handleCancel = async (id: number) => {
+        if (!confirm("¿Estás seguro de cancelar esta reserva? Esta acción no se puede deshacer.")) return;
+
+        try {
+            await api.post(`/admin/bookings/${id}/cancel`);
+            fetchBookings(); // Refresh data
+            fetchKPIs(); // Update stats
+        } catch (e) {
+            alert("Error al cancelar la reserva.");
+        }
+    };
+
+    const handleExport = async () => {
+        try {
+            const res = await api.get("/admin/reports/bookings", {
+                params: { format: "pdf" },
+                responseType: 'blob'
+            });
+
+            const url = window.URL.createObjectURL(new Blob([res.data]));
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "reservas.pdf";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        } catch (e) {
+            alert("Error al exportar.");
         }
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col">
-            {/* Top Navigation */}
-            <nav className="bg-white shadow z-10 sticky top-0">
-                <div className="flex items-center justify-between px-4 md:px-6 py-4 mx-auto max-w-7xl w-full">
-                    <div className="flex items-center gap-4 md:gap-8">
-                        <div className="flex items-center gap-2">
-                            <button className="md:hidden text-gray-500" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-                                <Menu size={24} />
-                            </button>
-                            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 cursor-pointer" onClick={() => setActiveTab('bookings')}>
-                                Villa Roli Admin
-                            </h1>
-                        </div>
+        <div className="bg-gradient-to-br from-gray-50 via-primary-50/20 to-secondary-50/20 min-h-screen pb-20 relative">
+            {/* Background Pattern */}
+            <div className="absolute inset-0 bg-pattern-dots bg-pattern-dots opacity-20 pointer-events-none"></div>
 
-                        <div className="hidden md:flex gap-1 bg-gray-100 p-1 rounded-lg">
-                            <button onClick={() => setActiveTab('bookings')} className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${activeTab === 'bookings' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-900'}`}>
-                                <LayoutDashboard size={18} />
-                                Reservas
-                            </button>
-                            <button onClick={() => setActiveTab('messages')} className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${activeTab === 'messages' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-900'}`}>
-                                <MessageSquare size={18} />
-                                Mensajes
-                            </button>
-                            <button onClick={() => setActiveTab('testimonials')} className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${activeTab === 'testimonials' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-900'}`}>
-                                <Quote size={18} />
-                                Testimonios
-                            </button>
-                            <button onClick={() => setActiveTab('blog')} className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${activeTab === 'blog' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-900'}`}>
-                                <FileText size={18} />
-                                Blog
-                            </button>
-                        </div>
+            <div className="relative max-w-7xl mx-auto p-8 space-y-8">
+                {/* Header */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h1 className="text-4xl font-bold tracking-tight text-gray-900">Panel de Reservas</h1>
+                        <p className="text-gray-600 mt-2 font-medium">Gestiona y monitorea todas las reservas del sistema.</p>
                     </div>
-                    <button onClick={handleLogout} className="flex items-center gap-2 text-gray-500 hover:text-red-600 font-medium text-sm">
-                        <LogOut size={18} />
-                        <span className="hidden md:inline">Salir</span>
-                    </button>
+                    <div className="flex gap-3">
+                        <Button variant="outline" onClick={loadDashboardData} disabled={isLoading}>
+                            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                            Actualizar
+                        </Button>
+                        <Button variant="gradient-secondary" onClick={handleExport}>
+                            <FileDown className="h-4 w-4" />
+                            Exportar PDF
+                        </Button>
+                    </div>
                 </div>
 
-                {/* Mobile Menu */}
-                {mobileMenuOpen && (
-                    <div className="md:hidden bg-white border-t px-4 py-2 space-y-1">
-                        <button onClick={() => { setActiveTab('bookings'); setMobileMenuOpen(false) }} className={`block w-full text-left px-4 py-2 rounded-md text-sm font-medium ${activeTab === 'bookings' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'}`}>Reservas</button>
-                        <button onClick={() => { setActiveTab('messages'); setMobileMenuOpen(false) }} className={`block w-full text-left px-4 py-2 rounded-md text-sm font-medium ${activeTab === 'messages' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'}`}>Mensajes</button>
-                        <button onClick={() => { setActiveTab('testimonials'); setMobileMenuOpen(false) }} className={`block w-full text-left px-4 py-2 rounded-md text-sm font-medium ${activeTab === 'testimonials' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'}`}>Testimonios</button>
-                        <button onClick={() => { setActiveTab('blog'); setMobileMenuOpen(false) }} className={`block w-full text-left px-4 py-2 rounded-md text-sm font-medium ${activeTab === 'blog' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'}`}>Blog</button>
+                {error && (
+                    <div className="bg-danger-50 border-2 border-danger-200 text-danger-700 px-4 py-3 rounded-lg relative animate-slide-down" role="alert">
+                        <strong className="font-bold">Error: </strong>
+                        <span className="block sm:inline">{error}</span>
                     </div>
                 )}
-            </nav>
 
-            {/* Main Content */}
-            <main className="flex-1 px-4 md:px-6 py-8 mx-auto max-w-7xl w-full">
+                {/* KPI Cards */}
+                <KPICards
+                    totalBookings={kpis.total_bookings}
+                    totalRevenue={kpis.monthly_revenue}
+                    activeBookings={kpis.active_bookings}
+                    occupancyRate={kpis.occupancy_rate}
+                />
 
-                {/* Header Actions */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                    <div>
-                        <h2 className="text-2xl font-bold text-gray-800">
-                            {activeTab === 'bookings' && 'Reservas'}
-                            {activeTab === 'messages' && 'Mensajes Recibidos'}
-                            {activeTab === 'testimonials' && 'Moderación de Opiniones'}
-                            {activeTab === 'blog' && 'Gestión del Blog'}
-                        </h2>
-                        <p className="text-gray-500 text-sm mt-1">
-                            {activeTab === 'bookings' && 'Gestiona y supervisa todas las reservas desde aquí.'}
-                            {activeTab === 'messages' && 'Bandeja de entrada de formulario de contacto.'}
-                            {activeTab === 'testimonials' && 'Aprueba o rechaza testimonios de clientes.'}
-                            {activeTab === 'blog' && 'Crea y edita artículos del blog.'}
-                        </p>
+                {/* Main Content */}
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6">
+                    <div className="mb-6">
+                        <h2 className="text-2xl font-bold text-gray-900">Listado de Reservas</h2>
+                        <p className="text-sm text-gray-600 mt-1">Visualiza y administra las reservas recientes.</p>
                     </div>
 
-                    {activeTab === 'bookings' && (
-                        <button
-                            onClick={() => setShowManualModal(true)}
-                            className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 flex items-center gap-2"
-                        >
-                            <Plus size={20} /> <span className="hidden md:inline">Nueva Reserva</span><span className="md:hidden">Nueva</span>
-                        </button>
-                    )}
+                    <ReservationsTable
+                        data={bookings}
+                        isLoading={isLoading}
+                        onView={(b) => setSelectedBooking(b)}
+                        onCancel={handleCancel}
+                    />
                 </div>
+            </div>
 
-                {/* Content Area */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-h-[500px]">
-                    {renderContent()}
-                </div>
-            </main>
-
-            {/* Manual Booking Modal */}
-            {showManualModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10">
-                            <h3 className="text-lg font-bold">Crear Reserva Manual</h3>
-                            <button onClick={() => setShowManualModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={24} />
-                            </button>
-                        </div>
-                        <div className="p-6">
-                            <ManualBookingForm onSuccess={() => setShowManualModal(false)} />
-                        </div>
-                    </div>
-                </div>
-            )}
+            <BookingDetailModal
+                isOpen={!!selectedBooking}
+                onClose={() => setSelectedBooking(null)}
+                booking={selectedBooking}
+            />
         </div>
     );
-}
+};
+
+export default Dashboard;
+

@@ -3,6 +3,7 @@ from app.domain import rules
 from app.db.repository import BookingRepository
 from app.core.exceptions import RuleViolationError
 from datetime import date
+from app.services.calendar_service import CalendarService
 
 class OverbookingError(Exception):
     pass
@@ -15,20 +16,27 @@ class BookingService:
         """
         Validates the booking request against the selected policy rules (PURE DOMAIN LOGIC).
         """
+        if not self.repo:
+            raise Exception("Repository not initialized for validation")
+
         # Common Validation (Past dates, min nights)
         rules.validate_dates_common(request)
+        
+        # Fetch holiday context (Single Source of Truth)
+        # We use check_holiday_window to get the full context (Window + Range)
+        holiday_context = CalendarService.check_holiday_window(self.repo, request.check_in, request.check_out)
 
         if request.policy_type == BookingPolicy.FULL_PROPERTY_WEEKDAY:
-            rules.validate_full_property_weekday(request)
+            rules.validate_full_property_weekday(request, holiday_context)
             
         elif request.policy_type == BookingPolicy.FULL_PROPERTY_WEEKEND:
-            rules.validate_full_property_weekend(request)
+            rules.validate_full_property_weekend(request, holiday_context)
             
         elif request.policy_type == BookingPolicy.FULL_PROPERTY_HOLIDAY:
-            rules.validate_full_property_holiday(request)
+            rules.validate_full_property_holiday(request, holiday_context)
             
         elif request.policy_type == BookingPolicy.FAMILY_PLAN:
-            rules.validate_family_plan(request)
+            rules.validate_family_plan(request, holiday_context)
             
         elif request.policy_type == BookingPolicy.DAY_PASS:
             rules.validate_day_pass(request)

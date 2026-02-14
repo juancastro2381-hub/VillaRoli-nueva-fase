@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.api.routers import bookings, auth, admin, payments
+from app.api.v1.endpoints import calendar
 from app.core.database import engine, Base
 
 # Create tables on startup (for demo purposes)
@@ -28,6 +29,7 @@ app.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(payments.router, prefix="/payments", tags=["payments"])
+app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["calendar"])
 
 from app.api.routers import content, admin_content
 app.include_router(content.router, prefix="/content", tags=["content"])
@@ -62,8 +64,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 @app.get("/")
+def root():
+    return {"status": "ok", "message": "Villa Roli Booking Engine"}
+
+@app.get("/health")
 def health_check():
-    return {"status": "ok", "message": "Booking Engine is running"}
+    return {"status": "ok", "service": "backend"}
 
 # Startup Events
 from app.core.scheduler import start_scheduler

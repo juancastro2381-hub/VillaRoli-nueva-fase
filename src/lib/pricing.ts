@@ -190,13 +190,6 @@ export function validarMinimoPersonas(tipo: TipoReserva, personas: number): { va
   return { valido: true, mensaje: "" };
 }
 
-// Festivos 2026 (Source of Truth matches Backend)
-export const HOLIDAYS_2026 = [
-  "2026-01-01", "2026-01-12", "2026-03-23", "2026-04-02", "2026-04-03",
-  "2026-05-01", "2026-05-18", "2026-06-08", "2026-06-15", "2026-06-29",
-  "2026-07-20", "2026-08-07", "2026-08-17", "2026-10-12", "2026-11-02",
-  "2026-11-16", "2026-12-08", "2026-12-25"
-];
 
 // Helper: Get dates between range (inclusive start, exclusive end)
 const getDatesInRange = (startStr: string, endStr: string): string[] => {
@@ -215,12 +208,6 @@ const getDatesInRange = (startStr: string, endStr: string): string[] => {
   return dates;
 };
 
-// Helper: Check holidays
-const getHolidaysInRange = (startStr: string, endStr: string): string[] => {
-  const dates = getDatesInRange(startStr, endStr);
-  return dates.filter(d => HOLIDAYS_2026.includes(d));
-};
-
 // =====================
 // VALIDACIÓN INTEGRAL (Mirror Backend Rules)
 // =====================
@@ -229,31 +216,12 @@ export interface ValidationResult {
   mensaje: string;
 }
 
-// Helper: Get the relevant "Sunday" for a date to determine the weekend window (Thu-Mon)
-const getWeekendSunday = (d: Date): Date => {
-  const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-  const sunday = new Date(d);
-
-  if (day === 0) { // Sun
-    // It is the sunday
-  } else if (day === 1) { // Mon -> belong to previous weekend
-    sunday.setDate(d.getDate() - 1);
-  } else if (day >= 4) { // Thu(4), Fri(5), Sat(6) -> belong to upcoming weekend
-    sunday.setDate(d.getDate() + (7 - day) % 7); // 4->+3(Sun), 5->+2, 6->+1
-  } else {
-    // Tue(2), Wed(3) -> No valid weekend context for this logic usually, 
-    // but let's default to next sunday to fail validation gracefully later
-    sunday.setDate(d.getDate() + (7 - day) % 7);
-  }
-  sunday.setHours(0, 0, 0, 0);
-  return sunday;
-};
-
 export function validarReglasNegocio(
   tipo: TipoReserva,
   personas: number,
   checkin: string,
-  checkout: string
+  checkout: string,
+  holidayContext?: { hasHolidayInWindow: boolean; holidays: string[]; holidays_in_range?: string[]; holidays_in_window?: string[] }
 ): ValidationResult {
   if (!checkin || !checkout || !tipo || !personas) return { valido: true, mensaje: "" };
 
@@ -281,43 +249,44 @@ export function validarReglasNegocio(
   }
 
   const nights = getDatesInRange(checkin, checkout);
-  const holidays = getHolidaysInRange(checkin, checkout);
+
+  // Strict API-Driven Validation
+  // We rely ONLY on holidayContext from the backend.
+  const hasHolidayInWindow = holidayContext?.hasHolidayInWindow ?? false;
+  // Use holidays_in_range from context if available, otherwise empty for safety
+  const holidaysInRange = holidayContext?.holidays_in_range || [];
 
   switch (tipo) {
     case "noches-entre-semana": // Mon-Thu only, No Holidays
       if (personas < 10) return { valido: false, mensaje: "Se requiere un mínimo de 10 personas para este plan." };
-      if (holidays.length > 0) return { valido: false, mensaje: "Este plan no está permitido en fechas festivas." };
+
+      // If it's a holiday window (puente), regular weekday plan might not be appropriate if it touches the holiday
+      // But strictly, we check if specific booked dates are holidays.
+      if (holidaysInRange.length > 0) return { valido: false, mensaje: "No puedes reservar días festivos con el plan Entre Semana." };
 
       for (const dateStr of nights) {
         const d = new Date(dateStr + "T00:00:00");
         const day = d.getDay();
         // Allowed: Mon(1), Tue(2), Wed(3), Thu(4)
+        // Block: Fri(5), Sat(6), Sun(0)
         if (day === 0 || day === 5 || day === 6) {
           return { valido: false, mensaje: "Este plan solo se puede reservar de lunes a jueves." };
         }
       }
       break;
 
-    case "noches-fin-semana": // Weekend Standard: Any combination of Fri/Sat/Sun nights
+    case "noches-fin-semana": // Weekend Standard
       if (personas < 10) return { valido: false, mensaje: "Se requiere un mínimo de 10 personas para este plan." };
 
-      // Block if any holiday is present
-      if (holidays.length > 0) {
+      // Critical: Block if it is a Holiday Weekend (Puente)
+      if (hasHolidayInWindow) {
         return {
           valido: false,
-          mensaje: "Hay un festivo en tus fechas. Debes seleccionar el plan 'Finca Completa - Festivo'."
+          mensaje: "Es un fin de semana con festivo (Puente). Debes seleccionar el plan 'Finca Completa - Festivo'."
         };
       }
 
-      // Night-based validation: All nights must be Friday(5), Saturday(6), or Sunday(0)
-      // Valid combinations:
-      // - Fri only: Fri→Sat
-      // - Sat only: Sat→Sun
-      // - Sun only: Sun→Mon
-      // - Fri+Sat: Fri→Sun
-      // - Sat+Sun: Sat→Mon
-      // - Fri+Sat+Sun: Fri→Mon
-
+      // Night-based validation
       for (const dateStr of nights) {
         const d = new Date(dateStr + "T00:00:00");
         const day = d.getDay();
@@ -331,54 +300,29 @@ export function validarReglasNegocio(
       }
       break;
 
-    case "noches-festivo": // Extended Holiday Window (Thu-Mon)
-      // 1. Min People
+    case "noches-festivo": // Festivo Plan (Thu-Mon)
       if (personas < 10) return { valido: false, mensaje: "Se requiere un mínimo de 10 personas para este plan." };
 
-      // 2. Max 4 nights (Thu-Mon = 4 nights max)
-      if (nights.length > 4) return { valido: false, mensaje: "El plan Festivo permite máximo 4 noches (Jueves a Lunes)." };
-
-      // 3. Holiday Validation (Context-Aware)
-      // Requirement: Accept ANY days (Thu, Fri, Sat, Sun, Mon) IF the weekend is a "Holiday Weekend".
-      // Users can book Fri-Sat, Sat-Sun, Sun-Mon, etc., even if they don't touch the holiday date itself,
-      // AS LONG AS the holiday exists in the surrounding weekend context (Thu-Mon).
-
-      // Helper to format date safely (Local YYYY-MM-DD)
-      const toLocalYMD = (d: Date) => {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-
-      // Identify the "Anchor Sunday" of the weekend
-      const anchorSunday = getWeekendSunday(start);
-
-      // Define the "Holiday Window" (Thu -> Mon)
-      const thuDate = new Date(anchorSunday); thuDate.setDate(anchorSunday.getDate() - 3);
-      const monDate = new Date(anchorSunday); monDate.setDate(anchorSunday.getDate() + 1);
-
-      const windowStartStr = toLocalYMD(thuDate);
-      const windowEndStr = toLocalYMD(monDate);
-
-      // Check if ANY holiday exists in this Thu-Mon window
-      const isHolidayWeekend = HOLIDAYS_2026.some(h => h >= windowStartStr && h <= windowEndStr);
-
-      if (!isHolidayWeekend) {
+      // 1. MUST be a holiday window
+      if (!hasHolidayInWindow) {
         return {
           valido: false,
-          mensaje: "Este plan requiere que el fin de semana seleccionado tenga un día festivo."
+          mensaje: "Este plan solo aplica para fines de semana que tengan un día festivo asociado. Por favor selecciona el plan Fin de Semana Estándar."
         };
       }
 
-      // 4. Day of Week Logic (Thu-Mon ONLY)
-      // Allowed nights: Thu(4), Fri(5), Sat(6), Sun(0), Mon(1).
-      // Disallowed: Tue(2), Wed(3).
+      // 2. Allowed Days Verification (Thu-Mon)
+      // Allowed nights: Thu(4), Fri(5), Sat(6), Sun(0), Mon(1)
       for (const dateStr of nights) {
         const d = new Date(dateStr + "T00:00:00");
         const day = d.getDay();
-        if (day === 2 || day === 3) { // Tue, Wed
-          return { valido: false, mensaje: "El plan Festivo está diseñado para fines de semana largos (Jueves a Lunes)." };
+
+        // Strict Block: Tue(2), Wed(3)
+        if (day === 2 || day === 3) {
+          return {
+            valido: false,
+            mensaje: "El plan Festivo está diseñado para fines de semana largos (Jueves a Lunes). Martes y miércoles no están incluidos a menos que sean festivos."
+          };
         }
       }
       break;
@@ -387,7 +331,7 @@ export function validarReglasNegocio(
       if (personas > 5) return { valido: false, mensaje: "El Plan Familia es válido solo para máximo 5 personas." };
       const duration = (end.getTime() - start.getTime()) / (1000 * 3600 * 24);
       if (duration !== 1) return { valido: false, mensaje: "El Plan Familia es para exactamente 1 noche." };
-      if (holidays.length > 0) return { valido: false, mensaje: "El Plan Familia no aplica en festivos." };
+      if (hasHolidayInWindow) return { valido: false, mensaje: "El Plan Familia no aplica en fines de semana con festivo." };
       break;
   }
 

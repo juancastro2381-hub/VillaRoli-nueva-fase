@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import date
 
@@ -11,6 +11,7 @@ from app.api.deps import get_current_admin
 from app.services.booking_engine import BookingService
 from app.db.repository import BookingRepository
 from app.services.reporting import ReportingService
+from app.services.pricing import PricingService
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -33,9 +34,11 @@ class BookingResponse(BaseModel):
     override_reason: Optional[str] = None
     rules_bypassed: Optional[str] = None
     
-    # We need to fetch Payment info manually or via relationship
-    # For now, let's assume we can get it from the ORM relationship 'payments'
-    # But Booking model might need to be eager loaded
+    # New Fields
+    total_amount: float
+    payment_method: Optional[str] = None
+    payment_status: Optional[str] = None
+    created_at: Optional[date] = None
     
     class Config:
         from_attributes = True
@@ -46,17 +49,267 @@ class PropertyCreate(BaseModel):
     max_guests: int
     base_price_night: float
 
+import logging
+from datetime import datetime, timedelta
+from sqlalchemy import func
+
+# Setup Logger
+logger = logging.getLogger(__name__)
+
+# ... imports ... 
+
+class KPIResponse(BaseModel):
+    total_bookings: int
+    monthly_revenue: float
+    active_bookings: int
+    occupancy_rate: float
+
+@router.get("/kpis", response_model=KPIResponse)
+def get_dashboard_kpis(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Returns Key Performance Indicators for the Admin Dashboard.
+    Optimized to run server-side calculations.
+    """
+    logger.info(f"Admin {current_admin.email} requesting KPIs")
+    
+    try:
+        # Total Bookings (All time)
+        total_bookings = db.query(Booking).count()
+        
+        # Active Bookings (CONFIRMED status, check_in <= today <= check_out)
+        today = date.today()
+        active_bookings = db.query(Booking).filter(
+            Booking.status == BookingStatus.CONFIRMED,
+            Booking.check_in <= today,
+            Booking.check_out >= today
+        ).count()
+        
+        # Monthly Revenue (Current Month)
+        # Since Booking doesn't have total_amount field, we calculate it for each booking
+        first_day_month = today.replace(day=1)
+        monthly_bookings = db.query(Booking).filter(
+            Booking.status == BookingStatus.CONFIRMED,
+            Booking.check_in >= first_day_month
+        ).all()
+        
+        monthly_revenue = 0.0
+        for booking in monthly_bookings:
+            try:
+                pricing = PricingService.calculate_total(
+                    check_in=booking.check_in,
+                    check_out=booking.check_out,
+                    guests=booking.guest_count,
+                    policy_type=booking.policy_type
+                )
+                monthly_revenue += pricing.get("total_amount", 0)
+            except Exception as e:
+                logger.warning(f"Error calculating price for booking {booking.id}: {e}")
+                continue
+        
+        # Occupancy Rate (Simple calculation based on active bookings)
+        # For more accuracy, would need to calculate booked nights / available nights
+        occupancy_rate = min(100.0, (active_bookings / 30.0) * 100) if active_bookings > 0 else 0.0
+        
+        return KPIResponse(
+            total_bookings=total_bookings,
+            monthly_revenue=monthly_revenue,
+            active_bookings=active_bookings,
+            occupancy_rate=round(occupancy_rate, 1)
+        )
+    except Exception as e:
+        logger.error(f"Error calculating KPIs: {e}")
+        raise HTTPException(status_code=500, detail=f"Error calculating KPIs: {str(e)}")
+
 @router.get("/bookings", response_model=List[BookingResponse])
 def list_bookings(
     status: Optional[str] = None,
     limit: int = 100,
+    skip: int = 0, # Added pagination skip
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
-    query = db.query(Booking)
-    if status:
+    logger.info(f"Admin {current_user.email} listing bookings status={status} limit={limit}")
+    query = db.query(Booking).options(joinedload(Booking.payments))
+    if status and status != "ALL":
         query = query.filter(Booking.status == status)
-    return query.limit(limit).all()
+    
+    # Pagination
+    bookings = query.order_by(Booking.id.desc()).offset(skip).limit(limit).all()
+    
+    response_list = []
+    # ... mapping logic ...
+    for b in bookings:
+        # Calculate Total Amount
+        pricing = PricingService.calculate_total(
+            check_in=b.check_in,
+            check_out=b.check_out,
+            guests=b.guest_count,
+            policy_type=b.policy_type
+        )
+        total_amnt = pricing["total_amount"]
+        
+        # Extract Payment Info (Assuming first payment record holds metadata)
+        p_method = None
+        p_status = None
+        created_date = None
+        if b.payments and len(b.payments) > 0:
+            # Sort payments by ID or creation? Usually just take the first one created.
+            p = b.payments[0] 
+            p_method = p.payment_method
+            p_status = p.status
+            created_date = p.created_at
+            
+        # If no payment record, maybe use override date or None
+        if not created_date and b.is_override:
+            created_date = b.override_created_at
+            
+        response_list.append(BookingResponse(
+            id=b.id,
+            property_id=b.property_id,
+            check_in=b.check_in,
+            check_out=b.check_out,
+            status=b.status,
+            guest_count=b.guest_count,
+            guest_name=b.guest_name,
+            guest_email=b.guest_email,
+            guest_phone=b.guest_phone,
+            guest_city=b.guest_city,
+            is_override=b.is_override,
+            override_reason=b.override_reason,
+            rules_bypassed=b.rules_bypassed,
+            total_amount=total_amnt,
+            payment_method=p_method,
+            payment_status=p_status,
+            created_at=created_date
+        ))
+        
+    return response_list
+
+# ============================================
+# PUBLIC DEVELOPMENT ENDPOINTS (NO AUTH)
+# ============================================
+# These endpoints are for development only - remove or protect in production
+
+@router.get("/kpis/public", response_model=KPIResponse)
+def get_dashboard_kpis_public(db: Session = Depends(get_db)):
+    """
+    PUBLIC endpoint for KPIs - FOR DEVELOPMENT ONLY.
+    Returns same data as /kpis but without authentication.
+    """
+    logger.info("Public KPIs endpoint accessed (development)")
+    
+    try:
+        total_bookings = db.query(Booking).count()
+        
+        today = date.today()
+        active_bookings = db.query(Booking).filter(
+            Booking.status == BookingStatus.CONFIRMED,
+            Booking.check_in <= today,
+            Booking.check_out >= today
+        ).count()
+        
+        first_day_month = today.replace(day=1)
+        monthly_bookings = db.query(Booking).filter(
+            Booking.status == BookingStatus.CONFIRMED,
+            Booking.check_in >= first_day_month
+        ).all()
+        
+        monthly_revenue = 0.0
+        for booking in monthly_bookings:
+            try:
+                pricing = PricingService.calculate_total(
+                    check_in=booking.check_in,
+                    check_out=booking.check_out,
+                    guests=booking.guest_count,
+                    policy_type=booking.policy_type
+                )
+                monthly_revenue += pricing.get("total_amount", 0)
+            except Exception as e:
+                logger.warning(f"Error calculating price for booking {booking.id}: {e}")
+                continue
+        
+        occupancy_rate = min(100.0, (active_bookings / 30.0) * 100) if active_bookings > 0 else 0.0
+        
+        return KPIResponse(
+            total_bookings=total_bookings,
+            monthly_revenue=monthly_revenue,
+            active_bookings=active_bookings,
+            occupancy_rate=round(occupancy_rate, 1)
+        )
+    except Exception as e:
+        logger.error(f"Error calculating public KPIs: {e}")
+        raise HTTPException(status_code=500, detail=f"Error calculating KPIs: {str(e)}")
+
+@router.get("/bookings/public", response_model=List[BookingResponse])
+def list_bookings_public(
+    status: Optional[str] = None,
+    limit: int = 100,
+    skip: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    PUBLIC endpoint for bookings list - FOR DEVELOPMENT ONLY.
+    Returns same data as /bookings but without authentication.
+    """
+    logger.info(f"Public bookings endpoint accessed (development) status={status} limit={limit}")
+    
+    query = db.query(Booking).options(joinedload(Booking.payments))
+    if status and status != "ALL":
+        query = query.filter(Booking.status == status)
+    
+    bookings = query.order_by(Booking.id.desc()).offset(skip).limit(limit).all()
+    
+    response_list = []
+    for b in bookings:
+        pricing = PricingService.calculate_total(
+            check_in=b.check_in,
+            check_out=b.check_out,
+            guests=b.guest_count,
+            policy_type=b.policy_type
+        )
+        total_amnt = pricing["total_amount"]
+        
+        p_method = None
+        p_status = None
+        created_date = None
+        if b.payments and len(b.payments) > 0:
+            p = b.payments[0] 
+            p_method = p.payment_method
+            p_status = p.status
+            created_date = p.created_at
+            
+        if not created_date and b.is_override:
+            created_date = b.override_created_at
+            
+        response_list.append(BookingResponse(
+            id=b.id,
+            property_id=b.property_id,
+            check_in=b.check_in,
+            check_out=b.check_out,
+            status=b.status,
+            guest_count=b.guest_count,
+            guest_name=b.guest_name,
+            guest_email=b.guest_email,
+            guest_phone=b.guest_phone,
+            guest_city=b.guest_city,
+            is_override=b.is_override,
+            override_reason=b.override_reason,
+            rules_bypassed=b.rules_bypassed,
+            total_amount=total_amnt,
+            payment_method=p_method,
+            payment_status=p_status,
+            created_at=created_date
+        ))
+        
+    return response_list
+
+# ============================================
+# END PUBLIC ENDPOINTS
+# ============================================
+
 
 @router.post("/properties")
 def create_property(
@@ -208,7 +461,7 @@ def confirm_payment(
 
 @router.get("/reports/bookings")
 def download_bookings_report(
-    format: str = Query("pdf", regex="^(pdf|xlsx)$"),
+    format: str = Query("pdf", pattern="^(pdf|xlsx)$"),
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: Session = Depends(get_db),

@@ -16,18 +16,8 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
-        // Note: Our backend routes are /auth, /bookings, /admin. 
-        // If frontend calls /api/auth -> backend /auth.
-        // If frontend calls /api/bookings -> backend /bookings.
+        secure: false,
       },
-      '/auth': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
-      },
-      '/admin': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
-      }
     }
   }
 })

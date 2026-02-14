@@ -82,5 +82,23 @@ class BookingRepository:
         self.db.refresh(db_booking)
         return db_booking
     
+
     def get_booking(self, booking_id: int) -> Optional[Booking]:
         return self.db.query(Booking).filter(Booking.id == booking_id).first()
+
+    def get_holidays_in_range(self, start: date, end: date) -> list[date]:
+        from app.db.models import Holiday
+        holidays = self.db.query(Holiday).filter(
+            Holiday.date >= start,
+            Holiday.date <= end
+        ).all()
+        return [h.date for h in holidays]
+
+    def add_holiday(self, date_obj: date, name: str = None):
+        from app.db.models import Holiday
+        # Check existence to avoid duplicate error unique constraint
+        existing = self.db.query(Holiday).filter(Holiday.date == date_obj).first()
+        if not existing:
+            holiday = Holiday(date=date_obj, name=name)
+            self.db.add(holiday)
+            self.db.commit()

@@ -1,6 +1,5 @@
 from datetime import timedelta, date
-from typing import List, Set
-from app.core.config import settings
+from typing import List, Set, Dict, Any
 from app.core.exceptions import RuleViolationError
 from app.domain.models import BookingRequest, BookingPolicy
 
@@ -8,10 +7,6 @@ def _get_date_range(start: date, end: date) -> List[date]:
     """Yields dates between start (inclusive) and end (exclusive)."""
     delta = (end - start).days
     return [start + timedelta(days=i) for i in range(delta)]
-
-def _get_holidays_in_range(start: date, end: date) -> Set[date]:
-    nights = _get_date_range(start, end)
-    return {d for d in nights if d in settings.HOLIDAYS_2026}
 
 def validate_dates_common(request: BookingRequest):
     """
@@ -42,7 +37,7 @@ def validate_day_pass(request: BookingRequest):
             rule_name="DAY_PASS_INVALID_RANGE"
         )
 
-def validate_full_property_weekday(request: BookingRequest):
+def validate_full_property_weekday(request: BookingRequest, context: Dict[str, Any]):
     """
     Mon-Thu only. No Holidays. Min 10 people.
     """
@@ -59,13 +54,14 @@ def validate_full_property_weekday(request: BookingRequest):
                 "Este plan solo se puede reservar de lunes a jueves.",
                 rule_name="INVALID_WEEKDAY_DATES"
             )
-        if night in settings.HOLIDAYS_2026:
-            raise RuleViolationError(
-                "Este plan no está permitido en fechas festivas.",
-                rule_name="PLAN_NOT_ALLOWED_ON_HOLIDAY"
-            )
+    
+    if context.get("holidays_in_range"):
+        raise RuleViolationError(
+            "Este plan no está permitido en fechas festivas.",
+            rule_name="PLAN_NOT_ALLOWED_ON_HOLIDAY"
+        )
 
-def validate_full_property_weekend(request: BookingRequest):
+def validate_full_property_weekend(request: BookingRequest, context: Dict[str, Any]):
     """
     Fri-Sun (Standard Weekend). No Holidays. Min 10 people.
     Allowed nights: Friday night, Saturday night.
@@ -86,17 +82,17 @@ def validate_full_property_weekend(request: BookingRequest):
             )
         
     # Check for holidays
-    holidays = _get_holidays_in_range(request.check_in, request.check_out)
-    if holidays:
+    if context.get("holidays_in_range"):
         raise RuleViolationError(
             "Este plan no está permitido en fechas festivas.", 
             rule_name="PLAN_NOT_ALLOWED_ON_HOLIDAY"
         )
 
-def validate_full_property_holiday(request: BookingRequest):
+def validate_full_property_holiday(request: BookingRequest, context: Dict[str, Any]):
     """
     Weekend with Holiday. Min 10 people.
     Must include a holiday or be attached to one.
+    Strictly checks if the context indicates a holiday window.
     """
     if request.guest_count < 10:
         raise RuleViolationError(
@@ -104,19 +100,16 @@ def validate_full_property_holiday(request: BookingRequest):
             rule_name="MIN_PEOPLE_NOT_MET"
         )
     
-    nights = _get_date_range(request.check_in, request.check_out)
-    has_holiday_night = any(n in settings.HOLIDAYS_2026 for n in nights)
-    checkout_is_monday_holiday = (request.check_out.weekday() == 0 and request.check_out in settings.HOLIDAYS_2026)
+    # Use the context flag which represents the "Window Logic" (Thu-Mon)
+    has_holiday_in_window = context.get("has_holiday_in_window", False)
     
-    is_valid_holiday_plan = has_holiday_night or checkout_is_monday_holiday
-    
-    if not is_valid_holiday_plan:
+    if not has_holiday_in_window:
          raise RuleViolationError(
             "Este plan requiere un fin de semana con festivo.",
             rule_name="HOLIDAY_REQUIRED"
         )
 
-def validate_family_plan(request: BookingRequest):
+def validate_family_plan(request: BookingRequest, context: Dict[str, Any]):
     """
     Max 5 People. Exactly 1 Night. No Holidays.
     """
@@ -133,8 +126,7 @@ def validate_family_plan(request: BookingRequest):
             rule_name="FAMILY_PLAN_ONE_NIGHT"
         )
         
-    holidays = _get_holidays_in_range(request.check_in, request.check_out)
-    if holidays:
+    if context.get("holidays_in_range"):
         raise RuleViolationError(
             "El Plan Familia no aplica en festivos.", 
             rule_name="PLAN_NOT_ALLOWED_ON_HOLIDAY"

@@ -158,3 +158,11 @@ class BlogPost(Base):
     author = relationship("User")
 
 Booking.payments = relationship("Payment", back_populates="booking")
+
+class Holiday(Base):
+    __tablename__ = "holidays"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=True)
+
