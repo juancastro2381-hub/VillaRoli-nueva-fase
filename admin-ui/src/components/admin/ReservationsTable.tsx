@@ -3,7 +3,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
 import { StatusBadge } from "./StatusBadge";
-import { Search, MoreHorizontal, Calendar as CalendarIcon } from "lucide-react";
+import { Search, MoreHorizontal } from "lucide-react";
 
 interface Booking {
     id: number;
@@ -28,9 +28,11 @@ interface ReservationsTableProps {
     isLoading?: boolean;
     onView: (booking: Booking) => void;
     onCancel: (id: number) => void;
+    onComplete: (id: number) => void;
+    onExpire: (id: number) => void;
 }
 
-export const ReservationsTable = ({ data, isLoading = false, onView, onCancel }: ReservationsTableProps) => {
+export const ReservationsTable = ({ data, isLoading = false, onView, onCancel, onComplete, onExpire }: ReservationsTableProps) => {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [dateStart, setDateStart] = useState("");
@@ -225,7 +227,7 @@ export const ReservationsTable = ({ data, isLoading = false, onView, onCancel }:
                                             {booking.is_override && (
                                                 <div className="mt-1">
                                                     <span className="inline-flex items-center rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 ring-1 ring-inset ring-purple-700/10">
-                                                        Manual
+                                                        EXCEPCIÓN
                                                     </span>
                                                 </div>
                                             )}
@@ -253,7 +255,22 @@ export const ReservationsTable = ({ data, isLoading = false, onView, onCancel }:
                                                                 className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100"
                                                                 onClick={() => { onCancel(booking.id); setOpenMenuId(null); }}
                                                             >
-                                                                Cancelar Reserva
+                                                            </button>
+                                                        )}
+                                                        {booking.status === "CONFIRMED" && (
+                                                            <button
+                                                                className="block w-full px-4 py-2 text-left text-sm text-green-600 hover:bg-gray-100"
+                                                                onClick={() => { onComplete(booking.id); setOpenMenuId(null); }}
+                                                            >
+                                                                Marcar Completada
+                                                            </button>
+                                                        )}
+                                                        {(booking.status === "PENDING" || booking.status === "CONFIRMED") && (
+                                                            <button
+                                                                className="block w-full px-4 py-2 text-left text-sm text-orange-600 hover:bg-gray-100"
+                                                                onClick={() => { onExpire(booking.id); setOpenMenuId(null); }}
+                                                            >
+                                                                Forzar Expiración
                                                             </button>
                                                         )}
                                                     </div>

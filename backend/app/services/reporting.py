@@ -22,21 +22,23 @@ class ReportingService:
         elements.append(Paragraph(f"Generado: {date.today()}", styles['Normal']))
         elements.append(Paragraph(" ", styles['Normal']))
         
-        # Headers
-        data = [['ID', 'Fecha Entrada', 'Fecha Salida', 'Plan', 'Huéspedes', 'Estado', 'Pago', 'Excepción']]
+        # Updated Headers
+        data = [['ID', 'Entrada', 'Salida', 'Plan', 'Pax', 'Estado', 'Canal', 'Excepción']]
         
         # Rows
         for b in bookings:
             payment_status = b.payments[0].status if b.payments else "N/A"
+            channel = "Admin" if b.created_by_admin_id else "Online"
             override = "SÍ" if b.is_override else "NO"
+            
             data.append([
                 str(b.id),
                 str(b.check_in),
                 str(b.check_out),
-                b.policy_type.value,
+                b.policy_type.value[:10], # Truncate for PDF
                 str(b.guest_count),
                 b.status.value,
-                payment_status,
+                channel,
                 override
             ])
             
@@ -65,14 +67,16 @@ class ReportingService:
         ws.title = "Reservas"
         
         # Headers
+        # Headers
         headers = ['ID', 'Check-In', 'Check-Out', 'Plan', 'Huéspedes', 'Estado', 'Pago', 
-                   'Método Pago', 'Excepción', 'Motivo Excepción', 'Creado Por']
+                   'Método Pago', 'Canal', 'Excepción', 'Motivo Excepción', 'Admin ID']
         ws.append(headers)
         
         for b in bookings:
             payment = b.payments[0] if b.payments else None
             payment_status = payment.status if payment else "N/A"
             payment_method = payment.payment_method if payment else "N/A"
+            channel = "Manual Admin" if b.created_by_admin_id else "Online"
             
             ws.append([
                 b.id,
@@ -83,6 +87,7 @@ class ReportingService:
                 b.status.value,
                 payment_status,
                 payment_method,
+                channel,
                 "SÍ" if b.is_override else "NO",
                 b.override_reason or "",
                 b.created_by_admin_id or ""

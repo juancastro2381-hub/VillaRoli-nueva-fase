@@ -3,8 +3,9 @@ import api from "../lib/api";
 import { KPICards } from "../components/admin/KPICards";
 import { ReservationsTable } from "../components/admin/ReservationsTable";
 import { BookingDetailModal } from "../components/admin/BookingDetailModal";
+import { CreateBookingModal } from "../components/admin/CreateBookingModal";
 import { Button } from "../components/ui/button";
-import { FileDown, RefreshCw } from "lucide-react";
+import { FileDown, RefreshCw, Filter } from "lucide-react";
 
 interface Booking {
     id: number;
@@ -43,9 +44,16 @@ const Dashboard = () => {
     const [error, setError] = useState<string | null>(null);
     const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
+    // Filters & Pagination State
+    const [statusFilter, setStatusFilter] = useState("ALL");
+    const [page, setPage] = useState(1);
+    const limit = 20; // Pagination limit
+
     useEffect(() => {
         loadDashboardData();
-    }, []);
+    }, [statusFilter, page]);
 
     const loadDashboardData = () => {
         setIsLoading(true);
@@ -53,31 +61,34 @@ const Dashboard = () => {
         Promise.all([fetchBookings(), fetchKPIs()])
             .catch(e => {
                 console.error("Dashboard data error:", e);
-                if (!error) setError("Ocurrió un error al cargar los datos. Verifica tu conexión.");
+                if (!error) setError("Ocurrió un error al cargar los datos.");
             })
             .finally(() => setIsLoading(false));
     };
 
     const fetchBookings = async () => {
         try {
-            // Using public endpoint for development - switch to /admin/bookings when auth is configured
-            const res = await api.get("/admin/bookings/public");
+            const skip = (page - 1) * limit;
+            const res = await api.get("/admin/bookings", {
+                params: {
+                    status: statusFilter,
+                    limit: limit,
+                    skip: skip
+                }
+            });
             setBookings(res.data);
         } catch (e: any) {
             console.error("Failed to fetch bookings:", e);
-            setError("Error al cargar las reservas. Verifica que el backend esté corriendo.");
-            throw e;
+            setError("Error al cargar las reservas. Verifica tu sesión o el backend.");
         }
     };
 
     const fetchKPIs = async () => {
         try {
-            // Using public endpoint for development - switch to /admin/kpis when auth is configured
-            const res = await api.get("/admin/kpis/public");
+            const res = await api.get("/admin/kpis");
             setKpis(res.data);
         } catch (e: any) {
             console.error("Failed to load KPIs:", e);
-            setError("Error al cargar los KPIs. Verifica que el backend esté corriendo.");
         }
     };
 
@@ -86,24 +97,46 @@ const Dashboard = () => {
 
         try {
             await api.post(`/admin/bookings/${id}/cancel`);
-            fetchBookings(); // Refresh data
-            fetchKPIs(); // Update stats
+            fetchBookings(); // Refresh list
+            fetchKPIs(); // Refresh stats
         } catch (e) {
             alert("Error al cancelar la reserva.");
         }
     };
 
-    const handleExport = async () => {
+    const handleComplete = async (id: number) => {
+        if (!confirm("¿Marcar esta reserva como COMPLETADA?")) return;
+        try {
+            await api.post(`/admin/bookings/${id}/complete`);
+            fetchBookings();
+            fetchKPIs();
+        } catch (e) {
+            alert("Error al completar la reserva.");
+        }
+    };
+
+    const handleExpire = async (id: number) => {
+        if (!confirm("¿Forzar EXPIRACIÓN de esta reserva?")) return;
+        try {
+            await api.post(`/admin/bookings/${id}/expire`);
+            fetchBookings();
+            fetchKPIs();
+        } catch (e) {
+            alert("Error al expirar la reserva.");
+        }
+    };
+
+    const handleExport = async (format: 'pdf' | 'xlsx') => {
         try {
             const res = await api.get("/admin/reports/bookings", {
-                params: { format: "pdf" },
+                params: { format },
                 responseType: 'blob'
             });
 
             const url = window.URL.createObjectURL(new Blob([res.data]));
             const a = document.createElement("a");
             a.href = url;
-            a.download = "reservas.pdf";
+            a.download = `reservas.${format}`;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -114,30 +147,36 @@ const Dashboard = () => {
 
     return (
         <div className="bg-gradient-to-br from-gray-50 via-primary-50/20 to-secondary-50/20 min-h-screen pb-20 relative">
-            {/* Background Pattern */}
             <div className="absolute inset-0 bg-pattern-dots bg-pattern-dots opacity-20 pointer-events-none"></div>
 
             <div className="relative max-w-7xl mx-auto p-8 space-y-8">
                 {/* Header */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
-                        <h1 className="text-4xl font-bold tracking-tight text-gray-900">Panel de Reservas</h1>
-                        <p className="text-gray-600 mt-2 font-medium">Gestiona y monitorea todas las reservas del sistema.</p>
+                        <h1 className="text-4xl font-bold tracking-tight text-gray-900">Panel de Control</h1>
+                        <p className="text-gray-600 mt-2 font-medium">Vista general y gestión diaria.</p>
                     </div>
                     <div className="flex gap-3">
+                        <Button onClick={() => setIsCreateModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                            + Nueva Reserva
+                        </Button>
                         <Button variant="outline" onClick={loadDashboardData} disabled={isLoading}>
-                            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
                             Actualizar
                         </Button>
-                        <Button variant="gradient-secondary" onClick={handleExport}>
-                            <FileDown className="h-4 w-4" />
-                            Exportar PDF
+                        <Button variant="secondary" onClick={() => handleExport('pdf')}>
+                            <FileDown className="h-4 w-4 mr-2" />
+                            PDF
+                        </Button>
+                        <Button variant="outline" onClick={() => handleExport('xlsx')}>
+                            <FileDown className="h-4 w-4 mr-2" />
+                            Excel
                         </Button>
                     </div>
                 </div>
 
                 {error && (
-                    <div className="bg-danger-50 border-2 border-danger-200 text-danger-700 px-4 py-3 rounded-lg relative animate-slide-down" role="alert">
+                    <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-lg">
                         <strong className="font-bold">Error: </strong>
                         <span className="block sm:inline">{error}</span>
                     </div>
@@ -153,9 +192,53 @@ const Dashboard = () => {
 
                 {/* Main Content */}
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6">
-                    <div className="mb-6">
-                        <h2 className="text-2xl font-bold text-gray-900">Listado de Reservas</h2>
-                        <p className="text-sm text-gray-600 mt-1">Visualiza y administra las reservas recientes.</p>
+                    <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-900">Gestión de Reservas</h2>
+                            <p className="text-sm text-gray-600 mt-1">
+                                Página {page} - Mostrando {bookings.length} resultados
+                            </p>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            {/* Filter Control */}
+                            <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200">
+                                <Filter size={16} className="text-gray-500 ml-2" />
+                                <select
+                                    className="bg-transparent border-none text-sm focus:ring-0 text-gray-700 font-medium"
+                                    value={statusFilter}
+                                    onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                                >
+                                    <option value="ALL">Todos los Estados</option>
+                                    <option value="PENDING">Pendientes</option>
+                                    <option value="CONFIRMED">Confirmadas</option>
+                                    <option value="CANCELLED">Canceladas</option>
+                                    <option value="EXPIRED">Expiradas</option>
+                                    <option value="CHECKED_IN">Check-in</option>
+                                    <option value="COMPLETED">Completadas</option>
+                                </select>
+                            </div>
+
+                            {/* Pagination Controls */}
+                            <div className="flex gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                    disabled={page === 1}
+                                >
+                                    Anterior
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setPage(p => p + 1)}
+                                    disabled={bookings.length < limit}
+                                >
+                                    Siguiente
+                                </Button>
+                            </div>
+                        </div>
                     </div>
 
                     <ReservationsTable
@@ -163,7 +246,15 @@ const Dashboard = () => {
                         isLoading={isLoading}
                         onView={(b) => setSelectedBooking(b)}
                         onCancel={handleCancel}
+                        onComplete={handleComplete}
+                        onExpire={handleExpire}
                     />
+
+                    {bookings.length === 0 && !isLoading && (
+                        <div className="text-center py-12 text-gray-500">
+                            No se encontraron reservas con los filtros seleccionados.
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -172,9 +263,17 @@ const Dashboard = () => {
                 onClose={() => setSelectedBooking(null)}
                 booking={selectedBooking}
             />
+
+            <CreateBookingModal
+                isOpen={isCreateModalOpen}
+                onClose={() => setIsCreateModalOpen(false)}
+                onSuccess={() => {
+                    loadDashboardData();
+                    alert("Reserva creada exitosamente");
+                }}
+            />
         </div>
     );
 };
 
 export default Dashboard;
-

@@ -57,6 +57,7 @@ from sqlalchemy import func
 logger = logging.getLogger(__name__)
 
 # ... imports ... 
+from app.core.exceptions import RuleViolationError, OverbookingError 
 
 class KPIResponse(BaseModel):
     total_bookings: int
@@ -188,126 +189,89 @@ def list_bookings(
         
     return response_list
 
-# ============================================
-# PUBLIC DEVELOPMENT ENDPOINTS (NO AUTH)
-# ============================================
-# These endpoints are for development only - remove or protect in production
-
-@router.get("/kpis/public", response_model=KPIResponse)
-def get_dashboard_kpis_public(db: Session = Depends(get_db)):
-    """
-    PUBLIC endpoint for KPIs - FOR DEVELOPMENT ONLY.
-    Returns same data as /kpis but without authentication.
-    """
-    logger.info("Public KPIs endpoint accessed (development)")
-    
-    try:
-        total_bookings = db.query(Booking).count()
-        
-        today = date.today()
-        active_bookings = db.query(Booking).filter(
-            Booking.status == BookingStatus.CONFIRMED,
-            Booking.check_in <= today,
-            Booking.check_out >= today
-        ).count()
-        
-        first_day_month = today.replace(day=1)
-        monthly_bookings = db.query(Booking).filter(
-            Booking.status == BookingStatus.CONFIRMED,
-            Booking.check_in >= first_day_month
-        ).all()
-        
-        monthly_revenue = 0.0
-        for booking in monthly_bookings:
-            try:
-                pricing = PricingService.calculate_total(
-                    check_in=booking.check_in,
-                    check_out=booking.check_out,
-                    guests=booking.guest_count,
-                    policy_type=booking.policy_type
-                )
-                monthly_revenue += pricing.get("total_amount", 0)
-            except Exception as e:
-                logger.warning(f"Error calculating price for booking {booking.id}: {e}")
-                continue
-        
-        occupancy_rate = min(100.0, (active_bookings / 30.0) * 100) if active_bookings > 0 else 0.0
-        
-        return KPIResponse(
-            total_bookings=total_bookings,
-            monthly_revenue=monthly_revenue,
-            active_bookings=active_bookings,
-            occupancy_rate=round(occupancy_rate, 1)
-        )
-    except Exception as e:
-        logger.error(f"Error calculating public KPIs: {e}")
-        raise HTTPException(status_code=500, detail=f"Error calculating KPIs: {str(e)}")
-
-@router.get("/bookings/public", response_model=List[BookingResponse])
-def list_bookings_public(
-    status: Optional[str] = None,
-    limit: int = 100,
-    skip: int = 0,
-    db: Session = Depends(get_db)
+@router.get("/bookings/{booking_id}", response_model=BookingResponse)
+def get_booking_details(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
 ):
     """
-    PUBLIC endpoint for bookings list - FOR DEVELOPMENT ONLY.
-    Returns same data as /bookings but without authentication.
+    Get detailed information for a specific booking.
     """
-    logger.info(f"Public bookings endpoint accessed (development) status={status} limit={limit}")
-    
-    query = db.query(Booking).options(joinedload(Booking.payments))
-    if status and status != "ALL":
-        query = query.filter(Booking.status == status)
-    
-    bookings = query.order_by(Booking.id.desc()).offset(skip).limit(limit).all()
-    
-    response_list = []
-    for b in bookings:
-        pricing = PricingService.calculate_total(
-            check_in=b.check_in,
-            check_out=b.check_out,
-            guests=b.guest_count,
-            policy_type=b.policy_type
-        )
-        total_amnt = pricing["total_amount"]
+    booking = db.query(Booking).options(joinedload(Booking.payments)).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
         
-        p_method = None
-        p_status = None
-        created_date = None
-        if b.payments and len(b.payments) > 0:
-            p = b.payments[0] 
-            p_method = p.payment_method
-            p_status = p.status
-            created_date = p.created_at
-            
-        if not created_date and b.is_override:
-            created_date = b.override_created_at
-            
-        response_list.append(BookingResponse(
-            id=b.id,
-            property_id=b.property_id,
-            check_in=b.check_in,
-            check_out=b.check_out,
-            status=b.status,
-            guest_count=b.guest_count,
-            guest_name=b.guest_name,
-            guest_email=b.guest_email,
-            guest_phone=b.guest_phone,
-            guest_city=b.guest_city,
-            is_override=b.is_override,
-            override_reason=b.override_reason,
-            rules_bypassed=b.rules_bypassed,
-            total_amount=total_amnt,
-            payment_method=p_method,
-            payment_status=p_status,
-            created_at=created_date
-        ))
+    # Logic to populate BookingResponse (Reuse logic or extract to helper function)
+    # For now reusing explicit logic to ensure consistency
+    pricing = PricingService.calculate_total(
+        check_in=booking.check_in,
+        check_out=booking.check_out,
+        guests=booking.guest_count,
+        policy_type=booking.policy_type
+    )
+    total_amnt = pricing["total_amount"]
+    
+    p_method = None
+    p_status = None
+    created_date = None
+    if booking.payments and len(booking.payments) > 0:
+        p = booking.payments[0]
+        p_method = p.payment_method
+        p_status = p.status
+        created_date = p.created_at
         
-    return response_list
+    if not created_date and booking.is_override:
+        created_date = booking.override_created_at
+        
+    return BookingResponse(
+        id=booking.id,
+        property_id=booking.property_id,
+        check_in=booking.check_in,
+        check_out=booking.check_out,
+        status=booking.status,
+        guest_count=booking.guest_count,
+        guest_name=booking.guest_name,
+        guest_email=booking.guest_email,
+        guest_phone=booking.guest_phone,
+        guest_city=booking.guest_city,
+        is_override=booking.is_override,
+        override_reason=booking.override_reason,
+        rules_bypassed=booking.rules_bypassed,
+        total_amount=total_amnt,
+        payment_method=p_method,
+        payment_status=p_status,
+        created_at=created_date
+    )
+
+class UpdateStatusRequest(BaseModel):
+    status: BookingStatus
+
+@router.put("/bookings/{booking_id}/status")
+def update_booking_status(
+    booking_id: int,
+    status_req: UpdateStatusRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Force update the status of a booking.
+    Admin Only.
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+        
+    old_status = booking.status
+    booking.status = status_req.status
+    
+    logger.info(f"Admin {current_admin.email} changed booking {booking_id} status from {old_status} to {status_req.status}")
+    
+    db.commit()
+    return {"status": "updated", "id": booking.id, "new_status": booking.status}
 
 # ============================================
-# END PUBLIC ENDPOINTS
+# PUBLIC ENDPOINTS REMOVED FOR SECURITY
 # ============================================
 
 
@@ -335,6 +299,12 @@ class ManualBookingRequest(BaseModel):
     guest_count: int
     policy_type: BookingPolicy
     
+    
+    # Guest Info
+    guest_name: Optional[str] = None
+    guest_email: Optional[str] = None
+    guest_phone: Optional[str] = None
+    
     # Override fields
     is_override: bool = False
     override_reason: Optional[str] = None
@@ -358,7 +328,10 @@ def create_manual_booking(
         check_in=booking_req.check_in,
         check_out=booking_req.check_out,
         guest_count=booking_req.guest_count,
-        policy_type=booking_req.policy_type
+        policy_type=booking_req.policy_type,
+        guest_name=booking_req.guest_name,
+        guest_email=booking_req.guest_email,
+        guest_phone=booking_req.guest_phone
     )
     
     try:
@@ -370,6 +343,28 @@ def create_manual_booking(
             admin_id=current_admin.id
         )
         return {"status": "created", "booking_id": booking.id, "rules_bypassed": booking.rules_bypassed}
+    except OverbookingError as e:
+        # Return 409 with the clean message inside the exception
+        # OverbookingError(str) -> str(e) is the message
+        raise HTTPException(status_code=409, detail=str(e))
+    except RuleViolationError as e:
+        # Return 400 with a clean message. 
+        # The __str__ includes "Rule 'X' failed...", but we want just the message.
+        # We can try to extract it or just rely on what we put in. 
+        # Actually, let's fix the exception class or just strip it here?
+        # Better to access the raw message if possible, but RuleViolationError stores it in private?
+        # Looking at exceptions.py: super().__init__(f"Rule '{rule_name}' failed: {message}")
+        # So str(e) is the full string.
+        # However, checking the user request, they want ONLY "No puedes reservar fechas pasadas."
+        # I need to parse it or change RuleViolationError.
+        # For now, let's parse it if it starts with "Rule".
+        msg = str(e)
+        if "Rule" in msg and "failed: " in msg:
+            try:
+                msg = msg.split("failed: ")[1]
+            except IndexError:
+                pass
+        raise HTTPException(status_code=400, detail=msg)
     except Exception as e:
         # Map domain errors to HTTP errors
         # In a real app we'd have a global exception handler, but here we do it explicitly for clarity
@@ -486,6 +481,7 @@ def download_bookings_report(
             headers={"Content-Disposition": "attachment; filename=reservas.pdf"}
         )
     else:
+        xlsx_content = ReportingService.generate_bookings_xlsx(bookings)
         return Response(
             content=xlsx_content,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -506,9 +502,39 @@ def cancel_booking(
     db.commit()
     return {"status": "cancelled", "id": booking.id}
 
-    booking.status = BookingStatus.CONFIRMED
+@router.post("/bookings/{booking_id}/complete")
+def complete_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Mark a booking as COMPLETED (Checked-out successfully).
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+        
+    booking.status = BookingStatus.COMPLETED
     db.commit()
-    return {"status": "confirmed", "id": booking.id}
+    return {"status": "completed", "id": booking.id}
+
+@router.post("/bookings/{booking_id}/expire")
+def expire_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Force EXPIRE a booking (e.g. didn't pay in time).
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+        
+    booking.status = BookingStatus.EXPIRED
+    db.commit()
+    return {"status": "expired", "id": booking.id}
 
 from app.core.scheduler import expire_stale_bookings
 

@@ -29,7 +29,7 @@ class BookingRepository:
         
         candidates = self.db.query(Booking).filter(
             Booking.property_id == property_id,
-            Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.BLOCKED, BookingStatus.PENDING]),
+            Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.BLOCKED, BookingStatus.PENDING, BookingStatus.COMPLETED]),
             Booking.check_in <= end,
             Booking.check_out >= start
         ).all()

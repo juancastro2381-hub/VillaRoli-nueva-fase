@@ -1,12 +1,9 @@
 from app.domain.models import BookingRequest, BookingPolicy
 from app.domain import rules
 from app.db.repository import BookingRepository
-from app.core.exceptions import RuleViolationError
+from app.core.exceptions import RuleViolationError, OverbookingError
 from datetime import date
 from app.services.calendar_service import CalendarService
-
-class OverbookingError(Exception):
-    pass
 
 class BookingService:
     def __init__(self, repo: BookingRepository = None):
@@ -59,7 +56,11 @@ class BookingService:
         """
         rules_bypassed = []
         
-        # 1. Domain Validation (Commercial Rules)
+        # 1. Strict Rules (Cannot be overridden)
+        if request.check_in < date.today():
+             raise RuleViolationError("No puedes reservar fechas pasadas.", rule_name="PAST_DATE_NOT_ALLOWED")
+
+        # 2. Domain Validation (Commercial Rules - Skippable)
         try:
             self.validate_request(request)
         except RuleViolationError as e:
@@ -82,7 +83,7 @@ class BookingService:
         is_available = self.repo.check_availability(property_id, request.check_in, request.check_out)
         
         if not is_available:
-            raise OverbookingError(f"Property {property_id} is not available for the selected dates. Overbooking is NOT allowed.")
+            raise OverbookingError("Las fechas seleccionadas no están disponibles. Por favor elige otra fecha.")
         
         # 3. Persist
         booking_data = request.model_dump()

@@ -10,6 +10,7 @@ export const StatusBadge = ({ status }: StatusBadgeProps) => {
         "PENDING": { variant: "warning", withDot: true, pulse: true },
         "CANCELLED": { variant: "danger" },
         "EXPIRED": { variant: "default" },
+        "COMPLETED": { variant: "success" },
     };
 
     const config = statusConfig[status] || { variant: "default" as const };

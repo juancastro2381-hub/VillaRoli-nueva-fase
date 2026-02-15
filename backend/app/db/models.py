@@ -11,6 +11,7 @@ class BookingStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
     BLOCKED = "BLOCKED"
     EXPIRED = "EXPIRED"
+    COMPLETED = "COMPLETED"
 
 class Property(Base):
     __tablename__ = "properties"

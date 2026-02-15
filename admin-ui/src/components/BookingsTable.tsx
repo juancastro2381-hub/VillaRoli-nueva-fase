@@ -1,8 +1,7 @@
 
-import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
-import { Check, X, CreditCard, AlertTriangle, Eye } from 'lucide-react';
+import { Check, X, AlertTriangle } from 'lucide-react';
 
 interface Booking {
     id: number;
@@ -31,7 +30,7 @@ export default function BookingsTable({ bookings }: { bookings: Booking[] }) {
 
     const confirmBooking = useMutation({
         mutationFn: async (id: number) => {
-            await api.post(`/admin/bookings/${id}/confirm`);
+            await api.put(`/admin/bookings/${id}/status`, { status: "CONFIRMED" });
         },
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bookings'] })
     });
@@ -66,9 +65,9 @@ export default function BookingsTable({ bookings }: { bookings: Booking[] }) {
                             <td className="p-3">{booking.guest_count}</td>
                             <td className="p-3">
                                 <span className={`px-2 py-1 text-xs rounded-full font-semibold ${booking.status === 'CONFIRMED' ? 'bg-green-100 text-green-800' :
-                                        booking.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                                            booking.status === 'CANCELLED' ? 'bg-red-100 text-red-800' :
-                                                'bg-gray-100 text-gray-800'
+                                    booking.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                                        booking.status === 'CANCELLED' ? 'bg-red-100 text-red-800' :
+                                            'bg-gray-100 text-gray-800'
                                     }`}>
                                     {booking.status}
                                 </span>
