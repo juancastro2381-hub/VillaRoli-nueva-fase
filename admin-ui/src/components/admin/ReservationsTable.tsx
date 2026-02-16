@@ -27,12 +27,13 @@ interface ReservationsTableProps {
     data: Booking[];
     isLoading?: boolean;
     onView: (booking: Booking) => void;
+    onConfirm: (id: number) => void;
     onCancel: (id: number) => void;
     onComplete: (id: number) => void;
     onExpire: (id: number) => void;
 }
 
-export const ReservationsTable = ({ data, isLoading = false, onView, onCancel, onComplete, onExpire }: ReservationsTableProps) => {
+export const ReservationsTable = ({ data, isLoading = false, onView, onConfirm, onCancel, onComplete, onExpire }: ReservationsTableProps) => {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [dateStart, setDateStart] = useState("");
@@ -158,12 +159,12 @@ export const ReservationsTable = ({ data, isLoading = false, onView, onCancel, o
                             <tr>
                                 <th className="px-4 py-3 w-[80px]">ID</th>
                                 <th className="px-4 py-3">Huésped</th>
-                                <th className="px-4 py-3">Fechas</th>
-                                <th className="px-4 py-3">Pax</th>
-                                <th className="px-4 py-3">Total</th>
-                                <th className="px-4 py-3">Pago</th>
+                                <th className="px-4 py-3 hidden md:table-cell">Fechas</th>
+                                <th className="px-4 py-3 hidden lg:table-cell">Pax</th>
+                                <th className="px-4 py-3 text-right">Total</th>
+                                <th className="px-4 py-3 hidden xl:table-cell">Pago</th>
                                 <th className="px-4 py-3">Estado</th>
-                                <th className="px-4 py-3">Creación</th>
+                                <th className="px-4 py-3 hidden 2xl:table-cell">Creación</th>
                                 <th className="px-4 py-3 text-right">Acciones</th>
                             </tr>
                         </thead>
@@ -200,17 +201,21 @@ export const ReservationsTable = ({ data, isLoading = false, onView, onCancel, o
                                             <div className="flex flex-col">
                                                 <span className="font-medium text-gray-900">{booking.guest_name}</span>
                                                 <span className="text-xs text-gray-500">{booking.guest_email}</span>
+                                                {/* Mobile Date display */}
+                                                <span className="md:hidden text-xs text-gray-400 mt-1">
+                                                    {new Date(booking.check_in).toLocaleDateString()}
+                                                </span>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3">
+                                        <td className="px-4 py-3 hidden md:table-cell">
                                             <div className="flex flex-col text-sm text-gray-600">
                                                 <span className="whitespace-nowrap">In: {formatDate(booking.check_in)}</span>
                                                 <span className="whitespace-nowrap">Out: {formatDate(booking.check_out)}</span>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3 text-gray-600">{booking.guest_count}</td>
-                                        <td className="px-4 py-3 font-medium text-gray-900">{formatCurrency(booking.total_amount)}</td>
-                                        <td className="px-4 py-3">
+                                        <td className="px-4 py-3 text-gray-600 hidden lg:table-cell">{booking.guest_count}</td>
+                                        <td className="px-4 py-3 font-medium text-gray-900 text-right">{formatCurrency(booking.total_amount)}</td>
+                                        <td className="px-4 py-3 hidden xl:table-cell">
                                             <div className="flex flex-col gap-1 items-start">
                                                 <span className="inline-flex items-center rounded-full border border-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
                                                     {booking.payment_method || "N/A"}
@@ -232,7 +237,7 @@ export const ReservationsTable = ({ data, isLoading = false, onView, onCancel, o
                                                 </div>
                                             )}
                                         </td>
-                                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap hidden 2xl:table-cell">
                                             {formatDate(booking.created_at || "")}
                                         </td>
                                         <td className="px-4 py-3 text-right relative">
@@ -250,24 +255,36 @@ export const ReservationsTable = ({ data, isLoading = false, onView, onCancel, o
                                                         >
                                                             Ver Detalle
                                                         </button>
-                                                        {booking.status !== "CANCELLED" && (
+
+                                                        {booking.status === "PENDING" && (
                                                             <button
-                                                                className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100"
-                                                                onClick={() => { onCancel(booking.id); setOpenMenuId(null); }}
+                                                                className="block w-full px-4 py-2 text-left text-sm text-green-600 font-medium hover:bg-green-50"
+                                                                onClick={() => { onConfirm(booking.id); setOpenMenuId(null); }}
                                                             >
+                                                                Confirmar Reserva
                                                             </button>
                                                         )}
+
+                                                        {(booking.status === "PENDING" || booking.status === "CONFIRMED") && (
+                                                            <button
+                                                                className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                                                onClick={() => { onCancel(booking.id); setOpenMenuId(null); }}
+                                                            >
+                                                                Cancelar Reserva
+                                                            </button>
+                                                        )}
+
                                                         {booking.status === "CONFIRMED" && (
                                                             <button
-                                                                className="block w-full px-4 py-2 text-left text-sm text-green-600 hover:bg-gray-100"
+                                                                className="block w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-blue-50"
                                                                 onClick={() => { onComplete(booking.id); setOpenMenuId(null); }}
                                                             >
                                                                 Marcar Completada
                                                             </button>
                                                         )}
-                                                        {(booking.status === "PENDING" || booking.status === "CONFIRMED") && (
+                                                        {booking.status === "PENDING" && (
                                                             <button
-                                                                className="block w-full px-4 py-2 text-left text-sm text-orange-600 hover:bg-gray-100"
+                                                                className="block w-full px-4 py-2 text-left text-sm text-orange-600 hover:bg-orange-50"
                                                                 onClick={() => { onExpire(booking.id); setOpenMenuId(null); }}
                                                             >
                                                                 Forzar Expiración

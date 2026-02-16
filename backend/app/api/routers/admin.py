@@ -583,17 +583,122 @@ def download_bookings_report(
             headers={"Content-Disposition": "attachment; filename=reservas.xlsx"}
         )
 
+@router.post("/bookings/{booking_id}/confirm")
+def confirm_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Confirms a PENDING booking.
+    - Enforces State Machine: PENDING -> CONFIRMED.
+    - Validates/Updates Payment:
+        - Online: Must be PAID.
+        - Manual: Creates Payment (DIRECT_ADMIN_AGREEMENT) if missing.
+    - Audit: Logs action.
+    """
+    try:
+        booking = db.query(Booking).options(joinedload(Booking.payments)).filter(Booking.id == booking_id).first()
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+
+        # 1. State Machine Validation
+        if booking.status != BookingStatus.PENDING:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid transition. Cannot confirm booking with status {booking.status}"
+            )
+
+        # 2. Payment Logic
+        # Ensure imports are available
+        from app.db.models import Payment, PaymentMethod, PaymentStatus, PaymentProvider
+        
+        payment = booking.payments[0] if booking.payments else None
+
+        # Case A: Manual/Direct (No Payment Record) -> Create One
+        if not payment:
+            # Calculate amount if missing (it should be there from creation)
+            amount = booking.manual_total_amount or 0.0 
+            
+            new_payment = Payment(
+                booking_id=booking.id,
+                provider=PaymentProvider.DUMMY, # Internal
+                payment_method=PaymentMethod.DIRECT_ADMIN_AGREEMENT,
+                amount=amount,
+                status=PaymentStatus.CONFIRMED_DIRECT_PAYMENT,
+                confirmed_at=date.today(),
+                confirmed_by_admin_id=current_admin.id
+            )
+            db.add(new_payment)
+            # Note: We don't commit yet, but adding it to session matches the transaction
+
+        # Case B: Existing Payment (Online or Transfer)
+        else:
+            # If it's Online Gateway, it MUST be PAID
+            if payment.payment_method == PaymentMethod.ONLINE_GATEWAY:
+                if payment.status != PaymentStatus.PAID:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot confirm. Online payment is NOT paid."
+                    )
+            
+            # If it's Transfer, we mark it PAID
+            elif payment.payment_method == PaymentMethod.BANK_TRANSFER:
+                payment.status = PaymentStatus.PAID
+                payment.confirmed_at = date.today()
+                payment.confirmed_by_admin_id = current_admin.id
+
+            # If it's Direct, mark Confirmed
+            elif payment.payment_method == PaymentMethod.DIRECT_ADMIN_AGREEMENT:
+                 payment.status = PaymentStatus.CONFIRMED_DIRECT_PAYMENT
+                 payment.confirmed_at = date.today()
+                 payment.confirmed_by_admin_id = current_admin.id
+
+        # 3. Status Update
+        booking.status = BookingStatus.CONFIRMED
+        
+        # 4. Audit Log
+        logger.info(f"AUDIT: Admin {current_admin.id} CONFIRMED Booking {booking.id}. Timestamp: {datetime.now()}")
+
+        db.commit()
+        return {"status": "confirmed", "id": booking.id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error confirming booking {booking_id}: {str(e)}")
+        # Rollback in case of error to avoid stuck state
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
 @router.post("/bookings/{booking_id}/cancel")
 def cancel_booking(
     booking_id: int,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
+    """
+    Cancels a booking.
+    - Enforces State Machine: PENDING/CONFIRMED -> CANCELLED.
+    - Releases dates (implicit by status change).
+    """
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
         
+    # 1. State Machine Validation
+    if booking.status not in [BookingStatus.PENDING, BookingStatus.CONFIRMED]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid transition. Cannot cancel booking with status {booking.status}"
+        )
+
+    # 2. Update Status
+    previous_status = booking.status
     booking.status = BookingStatus.CANCELLED
+    
+    # 3. Audit Log
+    logger.info(f"AUDIT: Admin {current_admin.id} CANCELLED Booking {booking.id}. Prev: {previous_status}. Timestamp: {datetime.now()}")
+
     db.commit()
     return {"status": "cancelled", "id": booking.id}
 

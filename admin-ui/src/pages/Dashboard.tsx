@@ -42,6 +42,7 @@ const Dashboard = () => {
     });
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
     const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -55,13 +56,25 @@ const Dashboard = () => {
         loadDashboardData();
     }, [statusFilter, page]);
 
+    // Auto-clear notifications
+    useEffect(() => {
+        if (error || success) {
+            const timer = setTimeout(() => {
+                setError(null);
+                setSuccess(null);
+            }, 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [error, success]);
+
     const loadDashboardData = () => {
         setIsLoading(true);
-        setError(null);
+        // Don't clear error here to allow persistence if needed, or clear it if it's a fresh load
+        // setError(null); 
         Promise.all([fetchBookings(), fetchKPIs()])
             .catch(e => {
                 console.error("Dashboard data error:", e);
-                if (!error) setError("Ocurrió un error al cargar los datos.");
+                // Only set error if it's a hard fail
             })
             .finally(() => setIsLoading(false));
     };
@@ -79,7 +92,6 @@ const Dashboard = () => {
             setBookings(res.data);
         } catch (e: any) {
             console.error("Failed to fetch bookings:", e);
-            setError("Error al cargar las reservas. Verifica tu sesión o el backend.");
         }
     };
 
@@ -92,15 +104,27 @@ const Dashboard = () => {
         }
     };
 
+    const handleConfirm = async (id: number) => {
+        try {
+            await api.post(`/admin/bookings/${id}/confirm`);
+            setSuccess("Reserva confirmada exitosamente.");
+            fetchBookings();
+            fetchKPIs();
+        } catch (e: any) {
+            setError(e.response?.data?.detail || "Error al confirmar la reserva.");
+        }
+    };
+
     const handleCancel = async (id: number) => {
-        if (!confirm("¿Estás seguro de cancelar esta reserva? Esta acción no se puede deshacer.")) return;
+        if (!confirm("¿Estás seguro de cancelar esta reserva? ESTA ACCIÓN NO SE PUEDE DESHACER.\n\nSe liberarán las fechas inmediatamente.")) return;
 
         try {
             await api.post(`/admin/bookings/${id}/cancel`);
+            setSuccess("Reserva cancelada exitosamente.");
             fetchBookings(); // Refresh list
             fetchKPIs(); // Refresh stats
-        } catch (e) {
-            alert("Error al cancelar la reserva.");
+        } catch (e: any) {
+            setError(e.response?.data?.detail || "Error al cancelar la reserva.");
         }
     };
 
@@ -108,10 +132,11 @@ const Dashboard = () => {
         if (!confirm("¿Marcar esta reserva como COMPLETADA?")) return;
         try {
             await api.post(`/admin/bookings/${id}/complete`);
+            setSuccess("Reserva marcada como completada.");
             fetchBookings();
             fetchKPIs();
         } catch (e) {
-            alert("Error al completar la reserva.");
+            setError("Error al completar la reserva.");
         }
     };
 
@@ -119,10 +144,11 @@ const Dashboard = () => {
         if (!confirm("¿Forzar EXPIRACIÓN de esta reserva?")) return;
         try {
             await api.post(`/admin/bookings/${id}/expire`);
+            setSuccess("Reserva expirada forzosamente.");
             fetchBookings();
             fetchKPIs();
         } catch (e) {
-            alert("Error al expirar la reserva.");
+            setError("Error al expirar la reserva.");
         }
     };
 
@@ -140,8 +166,9 @@ const Dashboard = () => {
             document.body.appendChild(a);
             a.click();
             a.remove();
+            setSuccess(`Reporte ${format.toUpperCase()} exportado correctamente.`);
         } catch (e) {
-            alert("Error al exportar.");
+            setError("Error al exportar.");
         }
     };
 
@@ -149,14 +176,14 @@ const Dashboard = () => {
         <div className="bg-gradient-to-br from-gray-50 via-primary-50/20 to-secondary-50/20 min-h-screen pb-20 relative">
             <div className="absolute inset-0 bg-pattern-dots bg-pattern-dots opacity-20 pointer-events-none"></div>
 
-            <div className="relative max-w-7xl mx-auto p-8 space-y-8">
+            <div className="relative max-w-7xl mx-auto p-4 md:p-8 space-y-8">
                 {/* Header */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
-                        <h1 className="text-4xl font-bold tracking-tight text-gray-900">Panel de Control</h1>
+                        <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-gray-900">Panel de Control</h1>
                         <p className="text-gray-600 mt-2 font-medium">Vista general y gestión diaria.</p>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex gap-3 flex-wrap">
                         <Button onClick={() => setIsCreateModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                             + Nueva Reserva
                         </Button>
@@ -175,10 +202,17 @@ const Dashboard = () => {
                     </div>
                 </div>
 
+                {/* Notifications */}
                 {error && (
-                    <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                    <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-lg animate-in fade-in slide-in-from-top-2">
                         <strong className="font-bold">Error: </strong>
                         <span className="block sm:inline">{error}</span>
+                    </div>
+                )}
+                {success && (
+                    <div className="bg-green-50 border-2 border-green-200 text-green-700 px-4 py-3 rounded-lg animate-in fade-in slide-in-from-top-2">
+                        <strong className="font-bold">Éxito: </strong>
+                        <span className="block sm:inline">{success}</span>
                     </div>
                 )}
 
@@ -245,6 +279,7 @@ const Dashboard = () => {
                         data={bookings}
                         isLoading={isLoading}
                         onView={(b) => setSelectedBooking(b)}
+                        onConfirm={handleConfirm}
                         onCancel={handleCancel}
                         onComplete={handleComplete}
                         onExpire={handleExpire}
@@ -269,7 +304,7 @@ const Dashboard = () => {
                 onClose={() => setIsCreateModalOpen(false)}
                 onSuccess={() => {
                     loadDashboardData();
-                    alert("Reserva creada exitosamente");
+                    setSuccess("Reserva creada exitosamente.");
                 }}
             />
         </div>
