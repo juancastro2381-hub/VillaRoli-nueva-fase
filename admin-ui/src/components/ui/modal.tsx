@@ -23,7 +23,7 @@ export const Modal = ({ isOpen, onClose, title, children, footer }: ModalProps) 
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="w-full max-w-lg rounded-lg bg-white shadow-xl animate-in fade-in zoom-in duration-200">
+            <div className="w-full max-w-lg rounded-lg bg-white shadow-xl animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto flex flex-col">
                 <div className="flex items-center justify-between border-b p-4">
                     <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
                     <Button variant="ghost" size="icon" onClick={onClose}>

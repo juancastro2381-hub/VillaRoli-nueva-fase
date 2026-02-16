@@ -3,15 +3,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import { AdminLayout } from './components/admin/AdminLayout';
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: JSX.Element }) {
+import React from 'react';
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
-  return children;
+  return <>{children}</>;
 }
 
 import ContentMessages from './pages/ContentMessages';
@@ -25,10 +28,14 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/messages" element={<ProtectedRoute><ContentMessages /></ProtectedRoute>} />
-            <Route path="/testimonials" element={<ProtectedRoute><ContentTestimonials /></ProtectedRoute>} />
-            <Route path="/blog" element={<ProtectedRoute><ContentBlog /></ProtectedRoute>} />
+
+            {/* Protected Admin Routes with Layout */}
+            <Route element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/messages" element={<ContentMessages />} />
+              <Route path="/testimonials" element={<ContentTestimonials />} />
+              <Route path="/blog" element={<ContentBlog />} />
+            </Route>
           </Routes>
         </BrowserRouter>
       </AuthProvider>

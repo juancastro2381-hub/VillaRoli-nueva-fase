@@ -5,6 +5,7 @@ import api from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { BRAND_CONFIG } from '../lib/constants';
 
 export default function Login() {
     const { login } = useAuth();
@@ -56,10 +57,14 @@ export default function Login() {
                 <div className="glass rounded-2xl shadow-2xl p-8 space-y-6 border-2 border-white/20">
                     {/* Logo/Header */}
                     <div className="text-center space-y-2">
-                        <div className="mx-auto w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary-500/30 mb-4 transform hover:scale-110 transition-transform duration-300">
-                            <LogIn className="w-8 h-8 text-white" />
+                        <div className="mx-auto w-32 h-32 mb-4 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
+                            <img
+                                src={BRAND_CONFIG.logo}
+                                alt={BRAND_CONFIG.alt}
+                                className="w-full h-full object-contain drop-shadow-lg"
+                            />
                         </div>
-                        <h1 className="text-3xl font-bold gradient-text">Villa Roli</h1>
+                        <h1 className="text-3xl font-bold gradient-text">{BRAND_CONFIG.name}</h1>
                         <p className="text-gray-600 font-medium">Panel de Administración</p>
                     </div>
 
@@ -84,6 +89,7 @@ export default function Login() {
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     disabled={isLoading}
+                                    autoComplete="username"
                                 />
                             </div>
                         </div>
@@ -100,6 +106,7 @@ export default function Login() {
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                     disabled={isLoading}
+                                    autoComplete="current-password"
                                 />
                             </div>
                         </div>
@@ -125,4 +132,3 @@ export default function Login() {
         </div>
     );
 }
-

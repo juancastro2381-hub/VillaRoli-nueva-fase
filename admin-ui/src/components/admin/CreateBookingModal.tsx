@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Modal } from "../ui/modal";
 import { Button } from "../ui/button";
-import { CheckCircle2 } from "lucide-react"; // Import Icon
+import { CheckCircle2 } from "lucide-react";
 import api from "../../lib/api";
 
 interface CreateBookingModalProps {
@@ -12,7 +12,7 @@ interface CreateBookingModalProps {
 
 export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBookingModalProps) => {
     const [formData, setFormData] = useState({
-        property_id: 1, // Default to 1
+        property_id: 1,
         check_in: "",
         check_out: "",
         guest_count: 2,
@@ -24,23 +24,11 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
         guest_phone: "",
         subtotal: 0,
         cleaning_fee: 0,
-        // total_amount is derived
     });
 
-    const [nights, setNights] = useState(0);
-    const [appliedRate, setAppliedRate] = useState(0);
-
-    // Pricing Constants
-    const RATES = {
-        WEEKDAY: 55000,
-        WEEKEND: 60000,
-        HOLIDAY: 70000,
-        CLEANING: 70000
-    };
-
-    // Currency Formatter
+    // Formatting Helpers
     const formatCurrency = (value: number | string) => {
-        if (value === undefined || value === null) return "";
+        if (value === undefined || value === null) return "0";
         return new Intl.NumberFormat('es-CO').format(Number(value));
     };
 
@@ -48,88 +36,13 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
         return Number(value.replace(/\./g, ''));
     };
 
-    // Auto-calculate suggested price
-    useEffect(() => {
-        const calculatePrice = async () => {
-            if (!formData.check_in || !formData.check_out) {
-                setNights(0);
-                return;
-            }
-
-            const start = new Date(formData.check_in);
-            const end = new Date(formData.check_out);
-
-            if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-                setNights(0);
-                return;
-            }
-
-            const diffTime = Math.abs(end.getTime() - start.getTime());
-            const calculatedNights = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-
-            setNights(calculatedNights);
-
-            let rate = RATES.WEEKDAY;
-            let isHoliday = false;
-            let isWeekend = false;
-
-            // Check for Weekend
-            let currentDate = new Date(start);
-            while (currentDate < end) {
-                const day = currentDate.getDay();
-                if (day === 5 || day === 6 || day === 0) { // Fri, Sat, Sun
-                    isWeekend = true;
-                }
-                currentDate.setDate(currentDate.getDate() + 1);
-            }
-
-            // Check for Holidays
-            try {
-                const baseUrl = "http://localhost:8000/api/v1/calendar/holidays";
-                const params = new URLSearchParams();
-                params.append("check_in", formData.check_in);
-                params.append("check_out", formData.check_out);
-
-                const res = await fetch(baseUrl + "?" + params.toString());
-
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.has_holiday_in_window || (data.holidays_in_range && data.holidays_in_range.length > 0)) {
-                        isHoliday = true;
-                    }
-                }
-            } catch (err) {
-                console.error("Error fetching holidays:", err);
-            }
-
-            if (isHoliday) {
-                rate = RATES.HOLIDAY;
-            } else if (isWeekend) {
-                rate = RATES.WEEKEND;
-            } else {
-                rate = RATES.WEEKDAY;
-            }
-
-            setAppliedRate(rate);
-
-            // Calculate Suggested Splits
-            const newSubtotal = rate * formData.guest_count * calculatedNights;
-            const newCleaning = RATES.CLEANING;
-
-            setFormData(prev => ({
-                ...prev,
-                subtotal: newSubtotal,
-                cleaning_fee: newCleaning
-            }));
-        };
-
-        calculatePrice();
-    }, [formData.check_in, formData.check_out, formData.guest_count]);
-
+    // State
+    const [priceBreakdown, setPriceBreakdown] = useState<string[]>([]);
+    const [isCalculating, setIsCalculating] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Reset form
+    // Initial State Reset
     useEffect(() => {
         if (isOpen) {
             setFormData({
@@ -147,9 +60,89 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
                 cleaning_fee: 0
             });
             setError(null);
-            setNights(0);
+            setPriceBreakdown([]);
         }
     }, [isOpen]);
+
+    // Plan Change Handler
+    const handlePlanChange = (newPolicy: string) => {
+        let updates: any = { policy_type: newPolicy };
+
+        if (newPolicy === 'day_pass') {
+            // Pasadía: Force same day
+            if (formData.check_in) {
+                updates.check_out = formData.check_in;
+            }
+        } else if (newPolicy === 'family_plan') {
+            // Family Plan: Max 5 guests, 1 night
+            if (formData.guest_count > 5) {
+                updates.guest_count = 5;
+            }
+            if (formData.check_in) {
+                const d = new Date(formData.check_in);
+                d.setDate(d.getDate() + 1);
+                updates.check_out = d.toISOString().split('T')[0];
+            }
+        }
+        setFormData(prev => ({ ...prev, ...updates }));
+    };
+
+    // Calculate Price via Server-Side Preview
+    useEffect(() => {
+        const fetchPrice = async () => {
+            if (!formData.check_in || !formData.check_out) {
+                return;
+            }
+
+            // Basic validation
+            const start = new Date(formData.check_in);
+            const end = new Date(formData.check_out);
+            const diffTime = end.getTime() - start.getTime();
+            const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (days < 0) return;
+
+            // Plan Specific Checks
+            if (formData.policy_type === 'day_pass' && days !== 0) return;
+            if (formData.policy_type === 'family_plan' && (days !== 1 || formData.guest_count > 5)) return;
+
+            setIsCalculating(true);
+            try {
+                const res = await api.post("/admin/pricing/preview", {
+                    check_in: formData.check_in,
+                    check_out: formData.check_out,
+                    guest_count: formData.guest_count,
+                    policy_type: formData.policy_type
+                });
+
+                const data = res.data;
+                setFormData(prev => ({
+                    ...prev,
+                    subtotal: data.subtotal,
+                    cleaning_fee: data.cleaning_fee
+                }));
+                setPriceBreakdown(data.breakdown || []);
+                setError(null);
+            } catch (err: any) {
+                console.error("Price Preview Error:", err);
+                if (err.response?.status === 400) {
+                    // Only set error if it is a strict validation error we want to show immediately?
+                    // Or just let them try to submit? 
+                    // Let's show it if it's descriptive
+                    setError(err.response.data.detail);
+                }
+            } finally {
+                setIsCalculating(false);
+            }
+        };
+
+        const timeoutId = setTimeout(() => {
+            fetchPrice();
+        }, 500);
+
+        return () => clearTimeout(timeoutId);
+    }, [formData.check_in, formData.check_out, formData.guest_count, formData.policy_type]);
+
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -163,9 +156,28 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
         const checkInDate = new Date(formData.check_in);
         const checkOutDate = new Date(formData.check_out);
 
-        if (checkOutDate <= checkInDate) {
-            setError("La fecha de salida debe ser posterior a la de llegada.");
-            return;
+        // Strict Plan Validations
+        if (formData.policy_type === 'day_pass') {
+            if (formData.check_in !== formData.check_out) {
+                setError("Para Pasadía, la fecha de llegada y salida debe ser la misma.");
+                return;
+            }
+        } else if (formData.policy_type === 'family_plan') {
+            const diff = checkOutDate.getTime() - checkInDate.getTime();
+            const nights = Math.ceil(diff / (1000 * 3600 * 24));
+            if (nights !== 1) {
+                setError("El Plan Familia es para exactamente 1 noche.");
+                return;
+            }
+            if (formData.guest_count > 5) {
+                setError("El Plan Familia permite un máximo de 5 personas.");
+                return;
+            }
+        } else {
+            if (checkOutDate <= checkInDate) {
+                setError("La fecha de salida debe ser posterior a la de llegada.");
+                return;
+            }
         }
 
         if (!formData.guest_name || !formData.guest_email || !formData.guest_phone) {
@@ -175,7 +187,7 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
 
         const total = formData.subtotal + formData.cleaning_fee;
         if (total <= 0) {
-            setError("El valor total de la reserva debe ser mayor a 0.");
+            setError("Error calculando el precio. Revise las fechas.");
             return;
         }
 
@@ -194,14 +206,7 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
         } catch (err: any) {
             console.error(err);
             if (err.response?.data?.detail) {
-                const detail = err.response.data.detail;
-                if (typeof detail === 'string') {
-                    setError(detail);
-                } else if (Array.isArray(detail)) {
-                    setError(detail.map((e: any) => e.msg).join(", "));
-                } else {
-                    setError(JSON.stringify(detail));
-                }
+                setError(err.response.data.detail);
             } else {
                 setError("Error al crear la reserva.");
             }
@@ -217,6 +222,19 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
             setFormData(prev => ({ ...prev, [name]: checked }));
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
+
+            // Auto-adjust dates if plan constraints exist
+            if (name === 'check_in' && value) {
+                const dateVal = value;
+                if (formData.policy_type === 'day_pass') {
+                    setFormData(prev => ({ ...prev, check_out: dateVal }));
+                } else if (formData.policy_type === 'family_plan') {
+                    const d = new Date(dateVal);
+                    d.setDate(d.getDate() + 1);
+                    const nextDay = d.toISOString().split('T')[0];
+                    setFormData(prev => ({ ...prev, check_out: nextDay }));
+                }
+            }
         }
     };
 
@@ -238,13 +256,49 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
         >
             <form onSubmit={handleSubmit} className="space-y-4">
                 {error && (
-                    <div className="bg-red-50 text-red-600 p-3 rounded text-sm font-medium">
+                    <div className="bg-red-50 text-red-600 p-3 rounded text-sm font-medium border border-red-200">
                         {error}
                     </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
+                <div className="bg-gray-50 p-3 rounded-lg border mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Plan</label>
+                    <div className="flex flex-col sm:flex-row gap-4">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="plan_selector"
+                                className="text-orange-600 focus:ring-orange-500"
+                                checked={formData.policy_type === 'full_property_weekday'}
+                                onChange={() => handlePlanChange('full_property_weekday')}
+                            />
+                            <span className="text-sm text-gray-900">Manual / Estándar</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="plan_selector"
+                                className="text-orange-600 focus:ring-orange-500"
+                                checked={formData.policy_type === 'day_pass'}
+                                onChange={() => handlePlanChange('day_pass')}
+                            />
+                            <span className="text-sm text-gray-900">Pasadía ($25k)</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="plan_selector"
+                                className="text-orange-600 focus:ring-orange-500"
+                                checked={formData.policy_type === 'family_plan'}
+                                onChange={() => handlePlanChange('family_plan')}
+                            />
+                            <span className="text-sm text-gray-900">Plan Familiar ($420k)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="col-span-1 sm:col-span-2">
                         <label className="block text-sm font-medium text-gray-700">Propiedad</label>
                         <select
                             name="property_id"
@@ -255,44 +309,55 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
                             <option value={1}>Villa Roli (Principal)</option>
                         </select>
                     </div>
-                    {/* Hidden Plan Selector - Defaulting to generic weekday plan but ignored due to override */}
-                    <input type="hidden" name="policy_type" value="full_property_weekday" />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Check-in</label>
+                        <label className="block text-sm font-medium text-gray-700">Llegada (Check-in)</label>
                         <input
                             type="date"
                             name="check_in"
                             value={formData.check_in}
                             onChange={handleChange}
+                            required
                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Check-out</label>
+                        <label className="block text-sm font-medium text-gray-700">
+                            {formData.policy_type === 'day_pass' ? "Salida (Mismo Día)" : "Salida (Check-out)"}
+                        </label>
                         <input
                             type="date"
                             name="check_out"
                             value={formData.check_out}
                             onChange={handleChange}
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
+                            required
+                            disabled={formData.policy_type === 'day_pass' || formData.policy_type === 'family_plan'}
+                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm p-2 border ${formData.policy_type !== 'full_property_weekday' ? 'bg-gray-100 cursor-not-allowed' : ''
+                                }`}
                         />
+                        {formData.policy_type === 'family_plan' && (
+                            <p className="text-xs text-blue-600 mt-1">Fijo 1 noche</p>
+                        )}
                     </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Huéspedes</label>
                         <input
                             type="number"
                             name="guest_count"
                             min="1"
+                            max={formData.policy_type === 'family_plan' ? 5 : 20}
                             value={formData.guest_count}
                             onChange={handleChange}
                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
                         />
+                        {formData.policy_type === 'family_plan' && (
+                            <p className="text-xs text-red-500 mt-1">Máximo 5 personas</p>
+                        )}
                     </div>
                 </div>
 
@@ -301,11 +366,16 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mt-2">
                         <h4 className="text-orange-900 font-semibold mb-3 flex items-center gap-2">
                             <CheckCircle2 className="w-5 h-5 text-orange-600" />
-                            Precio Estimado
+                            {isCalculating ? "Calculando..." : "Detalle de Precio"}
                         </h4>
-                        <p className="text-sm text-orange-800 mb-4">
-                            {formData.guest_count} personas × {nights} noche(s) × ${formatCurrency(appliedRate)} + aseo
-                        </p>
+
+                        {!isCalculating && priceBreakdown.length > 0 && (
+                            <ul className="text-sm text-orange-800 mb-4 list-disc pl-5 space-y-1">
+                                {priceBreakdown.map((item, idx) => (
+                                    <li key={idx}>{item}</li>
+                                ))}
+                            </ul>
+                        )}
 
                         <div className="space-y-2">
                             <div className="flex justify-between items-center">
@@ -334,13 +404,12 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
                             </div>
 
                             <div className="border-t border-orange-200 mt-3 pt-3 flex justify-between items-center">
-                                <span className="font-bold text-lg text-orange-900">Total:</span>
-                                <span className="font-bold text-lg text-orange-700">${formatCurrency(derivedTotal)} COP</span>
+                                <span className="font-bold text-lg text-orange-900">Total a Pagar:</span>
+                                <span className="font-bold text-xl text-orange-700">${formatCurrency(derivedTotal)} COP</span>
                             </div>
                         </div>
                     </div>
                 )}
-
 
                 <div className="border-t pt-4">
                     <h3 className="text-sm font-medium text-gray-900 mb-3">Datos del Huésped (Obligatorios)</h3>
@@ -357,7 +426,7 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
                             />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-xs font-medium text-gray-500 uppercase">Email</label>
                                 <input
@@ -386,10 +455,9 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
                     </div>
                 </div>
 
-                {/* Implicit Override: Hidden but active */}
                 <div className="border-t pt-4 mt-4 bg-gray-50 p-3 rounded-md">
                     <p className="text-xs text-gray-500 mb-2">
-                        <strong>Nota:</strong> Como administrador, tienes permisos para ignorar restricciones de plan (mínimo de noches, personas, etc), pero <strong>NO</strong> se permite sobre-reservar fechas ocupadas ni usar fechas pasadas.
+                        <strong>Nota:</strong> Como administrador, tienes permisos para ignorar ciertas reglas, pero el precio se calcula automáticamente según la política seleccionada.
                     </p>
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Notas / Observaciones (Opcional)</label>
@@ -399,14 +467,14 @@ export const CreateBookingModal = ({ isOpen, onClose, onSuccess }: CreateBooking
                             onChange={handleChange}
                             rows={2}
                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
-                            placeholder="Detalles adicionales de la reserva..."
+                            placeholder="Detalles adicionales..."
                         />
                     </div>
                 </div>
 
                 <div className="flex justify-end pt-4 gap-3">
                     <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
-                    <Button type="submit" disabled={isLoading}>
+                    <Button type="submit" disabled={isLoading || isCalculating}>
                         {isLoading ? "Creando..." : "Crear Reserva"}
                     </Button>
                 </div>
