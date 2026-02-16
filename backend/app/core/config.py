@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 300
     
     # Database
-    DATABASE_URL: str = "sqlite:///./villa_roli.db"
+    # using absolute path to avoid CWD issues
+    DATABASE_URL: str = "sqlite:///c:/Users/juanc/OneDrive/Documentos/Desarrollo proyectos/Villa Roli/Proyecto descargado/villa-roli-escape-main/backend/villa_roli.db"
     
     # Security / CORS
     ALLOWED_ORIGINS: list[str] = [

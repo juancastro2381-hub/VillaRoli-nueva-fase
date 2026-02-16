@@ -74,7 +74,7 @@ export const KPICards = ({ totalBookings, totalRevenue, activeBookings, occupanc
                         <div className={`absolute inset-0 bg-gradient-to-br ${kpi.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-300`}></div>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 relative">
                             <CardTitle className="text-sm font-semibold text-gray-600">{kpi.title}</CardTitle>
-                            <div className={`${kpi.iconBg} p-2.5 rounded-xl transition-transform duration-300 group-hover:scale-110 group-hover:shadow-lg`}>
+                            <div className={`${kpi.iconBg} p-2.5 rounded-xl transition-colors duration-300`}>
                                 <Icon className={`h-5 w-5 ${kpi.iconColor}`} />
                             </div>
                         </CardHeader>

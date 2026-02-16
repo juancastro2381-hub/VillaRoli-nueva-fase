@@ -133,59 +133,66 @@ def list_bookings(
     current_user: User = Depends(get_current_admin)
 ):
     logger.info(f"Admin {current_user.email} listing bookings status={status} limit={limit}")
-    query = db.query(Booking).options(joinedload(Booking.payments))
-    if status and status != "ALL":
-        query = query.filter(Booking.status == status)
-    
-    # Pagination
-    bookings = query.order_by(Booking.id.desc()).offset(skip).limit(limit).all()
-    
-    response_list = []
-    # ... mapping logic ...
-    for b in bookings:
-        # Calculate Total Amount
-        pricing = PricingService.calculate_total(
-            check_in=b.check_in,
-            check_out=b.check_out,
-            guests=b.guest_count,
-            policy_type=b.policy_type
-        )
-        total_amnt = pricing["total_amount"]
+    try:
+        query = db.query(Booking).options(joinedload(Booking.payments))
+        if status and status != "ALL":
+            query = query.filter(Booking.status == status)
         
-        # Extract Payment Info (Assuming first payment record holds metadata)
-        p_method = None
-        p_status = None
-        created_date = None
-        if b.payments and len(b.payments) > 0:
-            # Sort payments by ID or creation? Usually just take the first one created.
-            p = b.payments[0] 
-            p_method = p.payment_method
-            p_status = p.status
-            created_date = p.created_at
+        # Pagination
+        bookings = query.order_by(Booking.id.desc()).offset(skip).limit(limit).all()
+        
+        response_list = []
+        # ... mapping logic ...
+        for b in bookings:
+            # Calculate Total Amount
+            pricing = PricingService.calculate_total(
+                check_in=b.check_in,
+                check_out=b.check_out,
+                guests=b.guest_count,
+                policy_type=b.policy_type,
+                manual_total=b.manual_total_amount
+            )
+            total_amnt = pricing["total_amount"]
             
-        # If no payment record, maybe use override date or None
-        if not created_date and b.is_override:
-            created_date = b.override_created_at
-            
-        response_list.append(BookingResponse(
-            id=b.id,
-            property_id=b.property_id,
-            check_in=b.check_in,
-            check_out=b.check_out,
-            status=b.status,
-            guest_count=b.guest_count,
-            guest_name=b.guest_name,
-            guest_email=b.guest_email,
-            guest_phone=b.guest_phone,
-            guest_city=b.guest_city,
-            is_override=b.is_override,
-            override_reason=b.override_reason,
-            rules_bypassed=b.rules_bypassed,
-            total_amount=total_amnt,
-            payment_method=p_method,
-            payment_status=p_status,
-            created_at=created_date
-        ))
+            # Extract Payment Info (Assuming first payment record holds metadata)
+            p_method = None
+            p_status = None
+            created_date = None
+            if b.payments and len(b.payments) > 0:
+                # Sort payments by ID or creation? Usually just take the first one created.
+                p = b.payments[0] 
+                p_method = p.payment_method
+                p_status = p.status
+                created_date = p.created_at
+                
+            # If no payment record, maybe use override date or None
+            if not created_date and b.is_override:
+                created_date = b.override_created_at
+                
+            response_list.append(BookingResponse(
+                id=b.id,
+                property_id=b.property_id,
+                check_in=b.check_in,
+                check_out=b.check_out,
+                status=b.status,
+                guest_count=b.guest_count,
+                guest_name=b.guest_name,
+                guest_email=b.guest_email,
+                guest_phone=b.guest_phone,
+                guest_city=b.guest_city,
+                is_override=b.is_override,
+                override_reason=b.override_reason,
+                rules_bypassed=b.rules_bypassed,
+                total_amount=total_amnt,
+                payment_method=p_method,
+                payment_status=p_status,
+                created_at=created_date
+            ))
+        
+    except Exception as e:
+        logger.error(f"Error listing bookings: {e}")
+        # Return the actual error message to help debugging
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
         
     return response_list
 
@@ -208,7 +215,8 @@ def get_booking_details(
         check_in=booking.check_in,
         check_out=booking.check_out,
         guests=booking.guest_count,
-        policy_type=booking.policy_type
+        policy_type=booking.policy_type,
+        manual_total=booking.manual_total_amount
     )
     total_amnt = pricing["total_amount"]
     
@@ -308,6 +316,7 @@ class ManualBookingRequest(BaseModel):
     # Override fields
     is_override: bool = False
     override_reason: Optional[str] = None
+    manual_total_amount: Optional[float] = None
 
 @router.post("/bookings")
 def create_manual_booking(
@@ -331,7 +340,8 @@ def create_manual_booking(
         policy_type=booking_req.policy_type,
         guest_name=booking_req.guest_name,
         guest_email=booking_req.guest_email,
-        guest_phone=booking_req.guest_phone
+        guest_phone=booking_req.guest_phone,
+        manual_total_amount=booking_req.manual_total_amount
     )
     
     try:

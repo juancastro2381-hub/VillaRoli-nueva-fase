@@ -99,6 +99,8 @@ class BookingService:
             booking_data['override_reason'] = override_reason
             booking_data['rules_bypassed'] = "; ".join(rules_bypassed) if rules_bypassed else "None"
             booking_data['created_by_admin_id'] = admin_id
+            booking_data['created_by_admin_id'] = admin_id
             booking_data['override_created_at'] = date.today() # Or datetime.now() if column type allows
+            booking_data['manual_total_amount'] = request.manual_total_amount
         
         return self.repo.create_booking(booking_data)

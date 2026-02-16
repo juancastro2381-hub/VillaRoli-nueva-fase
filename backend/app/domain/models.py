@@ -24,6 +24,7 @@ class BookingRequest(BaseModel):
     # Payment Preference
     payment_method: str = "ONLINE_GATEWAY"
     payment_type: str = "FULL" # FULL or PARTIAL
+    manual_total_amount: float | None = None
 
     @field_validator('check_out')
     def validate_dates(cls, v, values):

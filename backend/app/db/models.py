@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum, Date, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum, Date, DateTime, Float
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.domain.models import BookingPolicy
@@ -57,6 +57,7 @@ class Booking(Base):
     rules_bypassed = Column(String, nullable=True) # Checkbox list or text
     created_by_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     override_created_at = Column(Date, nullable=True) # Timestamp of override
+    manual_total_amount = Column(Float, nullable=True) # Override price
     
     property = relationship("Property", back_populates="bookings")
 

@@ -25,7 +25,7 @@ class PricingService:
         return max(1, delta)
 
     @classmethod
-    def calculate_total(cls, check_in: date, check_out: date, guests: int, policy_type: BookingPolicy) -> Dict[str, Any]:
+    def calculate_total(cls, check_in: date, check_out: date, guests: int, policy_type: BookingPolicy, manual_total: float = None) -> Dict[str, Any]:
         """
         Calculates the total price and breakdown based on the policy and dates.
         """
@@ -34,6 +34,24 @@ class PricingService:
         breakdown = []
         
         nights = cls.get_nights(check_in, check_out)
+        
+        if manual_total is not None:
+             # Manual Override
+             subtotal = manual_total # Treating as subtotal for simplicity or total? 
+             # Let's assume manual_total is the FINAL price the admin wants.
+             # So we set cleaning fee to 0 or include it? 
+             # Usually "Total" means everything.
+             # Let's set total = manual_total
+             cleaning_fee = 0
+             breakdown.append(f"Precio Manual Definido por Admin: ${manual_total:,}")
+             return {
+                "subtotal": manual_total,
+                "cleaning_fee": 0,
+                "deposit": cls.DEPOSIT_AMOUNT,
+                "total_amount": manual_total,
+                "currency": "COP",
+                "breakdown": breakdown
+            }
         
         if policy_type == BookingPolicy.DAY_PASS:
             # Pasadía: Flat rate per person

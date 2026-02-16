@@ -194,7 +194,7 @@ export const ReservationsTable = ({ data, isLoading = false, onView, onCancel, o
                                 </tr>
                             ) : (
                                 paginatedData.map((booking) => (
-                                    <tr key={booking.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr key={booking.id} className="hover:bg-gray-50/50 transition-colors duration-150">
                                         <td className="px-4 py-3 font-medium text-gray-900">#{booking.id}</td>
                                         <td className="px-4 py-3">
                                             <div className="flex flex-col">

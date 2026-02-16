@@ -11,17 +11,18 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className = "", variant = "primary", size = "md", isLoading = false, leftIcon, rightIcon, children, disabled, ...props }, ref) => {
-    const baseStyles = "inline-flex items-center justify-center rounded-lg font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-95";
+    // Optimized transitions: Avoid transition-all, target specific properties. Removed active:scale-95 to prevent layout shifts.
+    const baseStyles = "inline-flex items-center justify-center rounded-lg font-medium transition-colors transition-shadow duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:opacity-90";
 
     const variants = {
-      primary: "bg-primary-500 text-white hover:bg-primary-600 hover:shadow-lg hover:shadow-primary-500/30 focus-visible:ring-primary-500",
-      secondary: "bg-secondary-500 text-white hover:bg-secondary-600 hover:shadow-lg hover:shadow-secondary-500/30 focus-visible:ring-secondary-500",
-      success: "bg-success-500 text-white hover:bg-success-600 hover:shadow-lg hover:shadow-success-500/30 focus-visible:ring-success-500",
-      outline: "border-2 border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 hover:shadow-md focus-visible:ring-gray-400",
+      primary: "bg-primary-500 text-white hover:bg-primary-600 hover:shadow-md focus-visible:ring-primary-500",
+      secondary: "bg-secondary-500 text-white hover:bg-secondary-600 hover:shadow-md focus-visible:ring-secondary-500",
+      success: "bg-success-500 text-white hover:bg-success-600 hover:shadow-md focus-visible:ring-success-500",
+      outline: "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm focus-visible:ring-gray-400",
       ghost: "text-gray-700 hover:bg-gray-100 hover:text-gray-900 focus-visible:ring-gray-400",
-      destructive: "bg-danger-500 text-white hover:bg-danger-600 hover:shadow-lg hover:shadow-danger-500/30 focus-visible:ring-danger-500",
-      "gradient-primary": "bg-gradient-primary text-white hover:shadow-xl hover:shadow-primary-500/40 hover:scale-105 focus-visible:ring-primary-500",
-      "gradient-secondary": "bg-gradient-secondary text-white hover:shadow-xl hover:shadow-secondary-500/40 hover:scale-105 focus-visible:ring-secondary-500",
+      destructive: "bg-danger-500 text-white hover:bg-danger-600 hover:shadow-md focus-visible:ring-danger-500",
+      "gradient-primary": "bg-gradient-primary text-white hover:shadow-lg hover:opacity-95 focus-visible:ring-primary-500",
+      "gradient-secondary": "bg-gradient-secondary text-white hover:shadow-lg hover:opacity-95 focus-visible:ring-secondary-500",
     };
 
     const sizes = {
