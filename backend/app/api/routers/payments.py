@@ -11,6 +11,9 @@ import json
 
 router = APIRouter()
 
+# Import for new endpoint
+from fastapi import Path
+
 from app.db.models import Payment, PaymentStatus, BookingStatus, PaymentProvider, PaymentMethod
 
 from app.services.booking_engine import BookingService, OverbookingError
@@ -201,6 +204,105 @@ async def payment_webhook(request: Request, db: Session = Depends(get_db)):
     
     logger.info(json.dumps({"event": "webhook_ignored_status", "status": event["status"]}))
     return {"status": "ignored"}
+
+from fastapi import UploadFile, File
+from app.services.file_storage import FileStorageService
+
+@router.post("/{payment_id}/evidence")
+async def upload_payment_evidence(
+    payment_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload payment evidence (receipt, screenshot, etc.)
+    
+    - **payment_id**: ID of the payment
+    - **file**: Image or PDF file (max 5MB)
+    
+    For bank transfers: Updates payment status to AWAITING_CONFIRMATION.
+    """
+    # Get payment
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    
+    # Validate payment method allows evidence
+    if payment.payment_method != PaymentMethod.BANK_TRANSFER:
+        raise HTTPException(
+            status_code=400,
+            detail="Evidence upload only allowed for bank transfers"
+        )
+    
+    # Validate booking is not expired
+    booking = payment.booking
+    if booking and booking.status == BookingStatus.EXPIRED:
+        raise HTTPException(
+            status_code=400,
+            detail="Booking has expired. Please create a new reservation."
+        )
+    
+    # Upload file
+    file_path = await FileStorageService.upload_evidence(payment_id, file)
+    
+    # Update payment
+    old_status = payment.status
+    payment.evidence_url = file_path
+    payment.evidence_uploaded_at = datetime.now()
+    
+    # Transition to AWAITING_CONFIRMATION if needed
+    if payment.status == PaymentStatus.PENDING_PAYMENT:
+        payment.status = PaymentStatus.AWAITING_CONFIRMATION
+    
+    db.commit()
+    
+    # Audit log
+    logger.info(json.dumps({
+        "event": "evidence_uploaded",
+        "payment_id": payment_id,
+        "booking_id": payment.booking_id,
+        "file_path": file_path,
+        "old_status": old_status.value,
+        "new_status": payment.status.value
+    }))
+    
+    return {"message": "Payment evidence uploaded", "status": "awaiting_confirmation"}
+
+
+@router.get("/{payment_id}/status")
+def get_payment_status(
+    payment_id: int = Path(..., description="Payment ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get payment status by ID for frontend polling.
+    
+    Returns payment information including status, expires_at, and evidence details.
+    Used by PaymentConfirmation page to check payment status.
+    """
+    # Get payment
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    
+    # Get booking
+    from app.db.models import Booking
+    booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
+    
+    return {
+        "payment_id": payment.id,
+        "booking_id": payment.booking_id,
+        "status": payment.status.value,
+        "payment_method": payment.payment_method.value,
+        "amount": float(payment.amount),
+        "currency": payment.currency,
+        "expires_at": booking.expires_at.isoformat() if booking and booking.expires_at else None,
+        "evidence_url": payment.evidence_url,
+        "evidence_uploaded_at": payment.evidence_uploaded_at.isoformat() if payment.evidence_uploaded_at else None,
+        "created_at": payment.created_at.isoformat() if payment.created_at else None,
+        "confirmed_at": payment.confirmed_at.isoformat() if payment.confirmed_at else None,
+    }
 
 from fastapi.responses import HTMLResponse
 

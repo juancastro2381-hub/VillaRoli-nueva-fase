@@ -5,6 +5,7 @@ from app.core.database import SessionLocal
 from app.db.models import Booking, BookingStatus
 from datetime import datetime
 import logging
+import json
 
 # Configure Logger
 logger = logging.getLogger("scheduler")
@@ -44,15 +45,33 @@ def expire_stale_bookings():
         for booking in stale_bookings:
             try:
                 old_status = booking.status
-                booking.status = BookingStatus.EXPIRED # inventory released logically by status check
-                logger.info(f"Booking {booking.id} EXPIRED. (Was {old_status}, ExpiresAt: {booking.expires_at})")
+                booking.status = BookingStatus.EXPIRED  # inventory released logically by status check
+                
+                # Structured audit log
+                logger.info(json.dumps({
+                    "event": "booking_expired",
+                    "booking_id": booking.id,
+                    "old_status": old_status.value,
+                    "new_status": "EXPIRED",
+                    "expires_at": booking.expires_at.isoformat() if booking.expires_at else None,
+                    "guest_email": booking.guest_email
+                }))
+                
                 expired_count += 1
             except Exception as e:
-                logger.error(f"Failed to expire booking {booking.id}: {e}")
+                logger.error(json.dumps({
+                    "event": "expiration_error",
+                    "booking_id": booking.id,
+                    "error": str(e)
+                }))
         
         db.commit()
+        
         if expired_count > 0:
-            logger.info(f"Successfully expired {expired_count} bookings.")
+            logger.info(json.dumps({
+                "event": "ttl_expiration_batch",
+                "expired_count": expired_count
+            }))
             
     except Exception as e:
         logger.error(f"Scheduler Error: {e}")

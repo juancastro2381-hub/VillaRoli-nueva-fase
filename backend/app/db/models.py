@@ -109,6 +109,10 @@ class Payment(Base):
     status = Column(SQLEnum(PaymentStatus), default=PaymentStatus.PENDING_PAYMENT, index=True)
     payload = Column(String, nullable=True)
     
+    # Evidence fields for bank transfers
+    evidence_url = Column(String, nullable=True)
+    evidence_uploaded_at = Column(DateTime, nullable=True)
+    
     created_at = Column(Date, default=date.today)
     confirmed_at = Column(Date, nullable=True)
     confirmed_by_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)

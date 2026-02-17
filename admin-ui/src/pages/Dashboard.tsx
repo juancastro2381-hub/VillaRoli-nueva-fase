@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 import { KPICards } from "../components/admin/KPICards";
 import { ReservationsTable } from "../components/admin/ReservationsTable";
 import { BookingDetailModal } from "../components/admin/BookingDetailModal";
 import { CreateBookingModal } from "../components/admin/CreateBookingModal";
+import { PendingPaymentsTable } from "../components/PendingPaymentsTable";
+import { usePendingPayments } from "../hooks/usePendingPayments";
+import { useAdminKpis } from "../hooks/useAdminKpis";
+import { useFinanceSummary } from "../hooks/useFinanceSummary";
 import { Button } from "../components/ui/button";
-import { FileDown, RefreshCw, Filter } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Badge } from "../components/ui/badge";
+import { FileDown, RefreshCw, Filter, CreditCard, CalendarDays } from "lucide-react";
 
 interface Booking {
     id: number;
@@ -25,36 +32,40 @@ interface Booking {
     override_reason?: string;
 }
 
-interface KPIStats {
-    total_bookings: number;
-    monthly_revenue: number;
-    active_bookings: number;
-    occupancy_rate: number;
-}
-
 const Dashboard = () => {
+    const navigate = useNavigate();
     const [bookings, setBookings] = useState<Booking[]>([]);
-    const [kpis, setKpis] = useState<KPIStats>({
-        total_bookings: 0,
-        monthly_revenue: 0,
-        active_bookings: 0,
-        occupancy_rate: 0
-    });
+
+    // KPI Hooks
+    const { kpis, loading: kpisLoading, refetch: refetchKpis } = useAdminKpis();
+    const { summary: financeSummary } = useFinanceSummary(); // For debug/future use
+
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState("reservations");
 
     // Filters & Pagination State
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [page, setPage] = useState(1);
     const limit = 20; // Pagination limit
 
+    // Pending Payments Hook
+    const { payments: pendingPayments, loading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = usePendingPayments();
+
     useEffect(() => {
         loadDashboardData();
     }, [statusFilter, page]);
+
+    // Debug visibility for Finance Summary
+    useEffect(() => {
+        if (financeSummary) {
+            console.log('financeSummary', financeSummary);
+        }
+    }, [financeSummary]);
 
     // Auto-clear notifications
     useEffect(() => {
@@ -71,7 +82,7 @@ const Dashboard = () => {
         setIsLoading(true);
         // Don't clear error here to allow persistence if needed, or clear it if it's a fresh load
         // setError(null); 
-        Promise.all([fetchBookings(), fetchKPIs()])
+        Promise.all([fetchBookings(), refetchKpis()])
             .catch(e => {
                 console.error("Dashboard data error:", e);
                 // Only set error if it's a hard fail
@@ -95,12 +106,27 @@ const Dashboard = () => {
         }
     };
 
-    const fetchKPIs = async () => {
-        try {
-            const res = await api.get("/admin/kpis");
-            setKpis(res.data);
-        } catch (e: any) {
-            console.error("Failed to load KPIs:", e);
+    const handleKpiClick = (type: 'bookings' | 'revenue' | 'active' | 'occupancy') => {
+        switch (type) {
+            case 'bookings':
+                setActiveTab('reservations');
+                setStatusFilter('ALL');
+                break;
+            case 'revenue':
+                // Route doesn't exist yet, but user requested navigation. 
+                // For now, staying on dashboard or could navigate to a finance page if created.
+                // console.log("Navigate to Finance");
+                navigate('/admin/finance');
+                break;
+            case 'active':
+                setActiveTab('reservations');
+                setStatusFilter('CONFIRMED');
+                break;
+            case 'occupancy':
+                // navigate('/admin/calendar'); // Route doesn't exist in App.tsx yet
+                console.log("Navigate to Calendar");
+                navigate('/admin/calendar');
+                break;
         }
     };
 
@@ -109,7 +135,7 @@ const Dashboard = () => {
             await api.post(`/admin/bookings/${id}/confirm`);
             setSuccess("Reserva confirmada exitosamente.");
             fetchBookings();
-            fetchKPIs();
+            refetchKpis();
         } catch (e: any) {
             setError(e.response?.data?.detail || "Error al confirmar la reserva.");
         }
@@ -122,7 +148,7 @@ const Dashboard = () => {
             await api.post(`/admin/bookings/${id}/cancel`);
             setSuccess("Reserva cancelada exitosamente.");
             fetchBookings(); // Refresh list
-            fetchKPIs(); // Refresh stats
+            refetchKpis(); // Refresh stats
         } catch (e: any) {
             setError(e.response?.data?.detail || "Error al cancelar la reserva.");
         }
@@ -134,22 +160,36 @@ const Dashboard = () => {
             await api.post(`/admin/bookings/${id}/complete`);
             setSuccess("Reserva marcada como completada.");
             fetchBookings();
-            fetchKPIs();
+            refetchKpis();
         } catch (e) {
             setError("Error al completar la reserva.");
         }
     };
 
     const handleExpire = async (id: number) => {
-        if (!confirm("¿Forzar EXPIRACIÓN de esta reserva?")) return;
+        if (!confirm("¿Marcar esta reserva como expirada?")) return;
         try {
             await api.post(`/admin/bookings/${id}/expire`);
-            setSuccess("Reserva expirada forzosamente.");
-            fetchBookings();
-            fetchKPIs();
-        } catch (e) {
-            setError("Error al expirar la reserva.");
+            setSuccess("Reserva marcada como expirada.");
+            await loadDashboardData();
+        } catch (e: any) {
+            setError(
+                e.response?.data?.detail ||
+                "Error al marcar reserva como expirada."
+            );
         }
+    };
+
+    const handlePaymentConfirmed = (paymentId: number) => {
+        setSuccess(`Pago #${paymentId} confirmado exitosamente.`);
+        refetchPayments();
+        loadDashboardData(); // Refresh list
+        refetchKpis(); // Refresh KPIs
+    };
+
+    const handlePaymentRejected = (paymentId: number) => {
+        setSuccess(`Pago #${paymentId} rechazado.`);
+        refetchPayments();
     };
 
     const handleExport = async (format: 'pdf' | 'xlsx') => {
@@ -222,74 +262,108 @@ const Dashboard = () => {
                     totalRevenue={kpis.monthly_revenue}
                     activeBookings={kpis.active_bookings}
                     occupancyRate={kpis.occupancy_rate}
+                    onCardClick={handleKpiClick}
                 />
 
-                {/* Main Content */}
+                {/* Main Content with Tabs */}
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6">
-                    <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                        <div>
-                            <h2 className="text-2xl font-bold text-gray-900">Gestión de Reservas</h2>
-                            <p className="text-sm text-gray-600 mt-1">
-                                Página {page} - Mostrando {bookings.length} resultados
-                            </p>
-                        </div>
+                    <Tabs value={activeTab} onValueChange={setActiveTab}>
+                        <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+                            <TabsTrigger value="reservations" className="flex items-center gap-2">
+                                <CalendarDays className="h-4 w-4" />
+                                Reservaciones
+                            </TabsTrigger>
+                            <TabsTrigger value="payments" className="flex items-center gap-2">
+                                <CreditCard className="h-4 w-4" />
+                                Pagos
+                                {pendingPayments.length > 0 && (
+                                    <Badge variant="danger" className="ml-1">
+                                        {pendingPayments.length}
+                                    </Badge>
+                                )}
+                            </TabsTrigger>
+                        </TabsList>
 
-                        <div className="flex items-center gap-4">
-                            {/* Filter Control */}
-                            <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200">
-                                <Filter size={16} className="text-gray-500 ml-2" />
-                                <select
-                                    className="bg-transparent border-none text-sm focus:ring-0 text-gray-700 font-medium"
-                                    value={statusFilter}
-                                    onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-                                >
-                                    <option value="ALL">Todos los Estados</option>
-                                    <option value="PENDING">Pendientes</option>
-                                    <option value="CONFIRMED">Confirmadas</option>
-                                    <option value="CANCELLED">Canceladas</option>
-                                    <option value="EXPIRED">Expiradas</option>
-                                    <option value="CHECKED_IN">Check-in</option>
-                                    <option value="COMPLETED">Completadas</option>
-                                </select>
+                        {/* Reservations Tab */}
+                        <TabsContent value="reservations" className="space-y-6">
+                            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-gray-900">Gestión de Reservas</h2>
+                                    <p className="text-sm text-gray-600 mt-1">
+                                        Página {page} - Mostrando {bookings.length} resultados
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-4">
+                                    {/* Filter Control */}
+                                    <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200">
+                                        <Filter size={16} className="text-gray-500 ml-2" />
+                                        <select
+                                            className="bg-transparent border-none text-sm focus:ring-0 text-gray-700 font-medium"
+                                            value={statusFilter}
+                                            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                                        >
+                                            <option value="ALL">Todos los Estados</option>
+                                            <option value="PENDING">Pendientes</option>
+                                            <option value="CONFIRMED">Confirmadas</option>
+                                            <option value="CANCELLED">Canceladas</option>
+                                            <option value="EXPIRED">Expiradas</option>
+                                            <option value="CHECKED_IN">Check-in</option>
+                                            <option value="COMPLETED">Completadas</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Pagination Controls */}
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                                            disabled={page === 1}
+                                        >
+                                            Anterior
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setPage(p => p + 1)}
+                                            disabled={bookings.length < limit}
+                                        >
+                                            Siguiente
+                                        </Button>
+                                    </div>
+                                </div>
                             </div>
 
-                            {/* Pagination Controls */}
-                            <div className="flex gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                                    disabled={page === 1}
-                                >
-                                    Anterior
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setPage(p => p + 1)}
-                                    disabled={bookings.length < limit}
-                                >
-                                    Siguiente
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
+                            <ReservationsTable
+                                data={bookings}
+                                isLoading={isLoading}
+                                onView={(b) => setSelectedBooking(b)}
+                                onConfirm={handleConfirm}
+                                onCancel={handleCancel}
+                                onComplete={handleComplete}
+                                onExpire={handleExpire}
+                            />
 
-                    <ReservationsTable
-                        data={bookings}
-                        isLoading={isLoading}
-                        onView={(b) => setSelectedBooking(b)}
-                        onConfirm={handleConfirm}
-                        onCancel={handleCancel}
-                        onComplete={handleComplete}
-                        onExpire={handleExpire}
-                    />
+                            {bookings.length === 0 && !isLoading && (
+                                <div className="text-center py-12 text-gray-500">
+                                    No se encontraron reservas con los filtros seleccionados.
+                                </div>
+                            )}
+                        </TabsContent>
 
-                    {bookings.length === 0 && !isLoading && (
-                        <div className="text-center py-12 text-gray-500">
-                            No se encontraron reservas con los filtros seleccionados.
-                        </div>
-                    )}
+                        {/* Payments Tab */}
+                        <TabsContent value="payments">
+                            <PendingPaymentsTable
+                                payments={pendingPayments}
+                                loading={paymentsLoading}
+                                error={paymentsError}
+                                onRefresh={refetchPayments}
+                                onPaymentConfirmed={handlePaymentConfirmed}
+                                onPaymentRejected={handlePaymentRejected}
+                            />
+                        </TabsContent>
+                    </Tabs>
                 </div>
             </div>
 

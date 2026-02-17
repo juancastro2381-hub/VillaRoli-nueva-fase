@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import date
 
 from app.core.database import get_db
-from app.db.models import Booking, User, BookingStatus, Property
+from app.db.models import Booking, User, BookingStatus, Property, Payment, PaymentStatus
 from app.domain.models import BookingPolicy
 from app.api.deps import get_current_admin
 from app.services.booking_engine import BookingService
@@ -747,3 +747,132 @@ def trigger_expiration_job(
     """
     expire_stale_bookings()
     return {"status": "job_triggered", "message": "Stale bookings expiration logic executed."}
+
+
+# ==================== PAYMENT CONFIRMATION ENDPOINTS ====================
+
+from app.services.payment_state_engine import PaymentStateEngine, InvalidStateTransitionError
+from app.db.models import Payment, PaymentStatus
+
+@router.post("/payments/{payment_id}/confirm")
+def confirm_bank_transfer(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """
+    Confirm a bank transfer payment after reviewing evidence.
+    
+    **Authorization:** Admin only
+    
+    **State Transition:**
+    - Payment: AWAITING_CONFIRMATION → PAID
+    - Booking: PENDING → CONFIRMED
+    """
+    try:
+        result = PaymentStateEngine.confirm_bank_transfer(
+            payment_id=payment_id,
+            admin_id=admin.id,
+            db=db
+        )
+        return result
+    except InvalidStateTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/payments/{payment_id}/reject")
+def reject_payment(
+    payment_id: int,
+    reason: str = Query(..., description="Reason for rejection"),
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """
+    Reject a payment.
+    
+    **Authorization:** Admin only
+    
+    **State Transition:**
+    - Payment: AWAITING_CONFIRMATION/PENDING_DIRECT_PAYMENT → FAILED
+    - Booking: Stays PENDING (user can retry)
+    """
+    try:
+        result = PaymentStateEngine.reject_payment(
+            payment_id=payment_id,
+            admin_id=admin.id,
+            reason=reason,
+            db=db
+        )
+        return result
+    except InvalidStateTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/payments/{payment_id}/confirm-direct")
+def confirm_direct_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """
+    Confirm a direct admin agreement payment.
+    
+    **Authorization:** Admin only
+    
+    **State Transition:**
+    - Payment: PENDING_DIRECT_PAYMENT → CONFIRMED_DIRECT_PAYMENT
+    - Booking: PENDING → CONFIRMED
+    """
+    try:
+        result = PaymentStateEngine.confirm_direct_payment(
+            payment_id=payment_id,
+            admin_id=admin.id,
+            db=db
+        )
+        return result
+    except InvalidStateTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/payments/pending")
+def get_pending_payments(
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """
+    Get all payments pending admin confirmation.
+    
+    **Authorization:** Admin only
+    
+    Returns payments in AWAITING_CONFIRMATION or PENDING_DIRECT_PAYMENT status.
+    """
+    pending_payments = db.query(Payment).filter(
+        Payment.status.in_([
+            PaymentStatus.AWAITING_CONFIRMATION,
+            PaymentStatus.PENDING_DIRECT_PAYMENT
+        ])
+    ).options(joinedload(Payment.booking)).all()
+    
+    result = []
+    for payment in pending_payments:
+        result.append({
+            "payment_id": payment.id,
+            "booking_id": payment.booking_id,
+            "amount": float(payment.amount),
+            "currency": payment.currency,
+            "status": payment.status.value,
+            "payment_method": payment.payment_method.value,
+            "evidence_url": payment.evidence_url,
+            "evidence_uploaded_at": payment.evidence_uploaded_at.isoformat() if payment.evidence_uploaded_at else None,
+            "created_at": payment.created_at.isoformat() if payment.created_at else None,
+            "booking": {
+                "id": payment.booking.id,
+                "guest_name": payment.booking.guest_name,
+                "guest_email": payment.booking.guest_email,
+                "check_in": payment.booking.check_in.isoformat(),
+                "check_out": payment.booking.check_out.isoformat(),
+                "status": payment.booking.status.value
+            } if payment.booking else None
+        })
+    
+    return {"pending_payments": result, "count": len(result)}

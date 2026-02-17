@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.routers import bookings, auth, admin, payments
+from app.api.routers import bookings, auth, admin, payments, finance
 from app.api.v1.endpoints import calendar
 from app.core.database import engine, Base
 
@@ -28,6 +28,7 @@ app.add_middleware(
 app.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
+app.include_router(finance.router, prefix="/admin/finance", tags=["finance"])
 app.include_router(payments.router, prefix="/payments", tags=["payments"])
 app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["calendar"])
 
