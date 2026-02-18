@@ -145,24 +145,34 @@ logger.setLevel(logging.INFO)
 
 @router.post("/webhook")
 async def payment_webhook(request: Request, db: Session = Depends(get_db)):
-    # 1. Get raw payload
-    payload = await request.json()
+    # 1. Get raw payload for signature verification
+    body_bytes = await request.body()
     headers = request.headers
     
-    log_context = {"event": "webhook_received", "provider": "DUMMY"}
+    # Parse JSON for logging/logic (after validation)
+    try:
+        payload = json.loads(body_bytes)
+    except json.JSONDecodeError:
+        payload = {}
+
+    log_context = {"event": "webhook_received", "provider": settings.PAYMENT_PROVIDER}
     logger.info(json.dumps(log_context))
     
     # 2. Validate via Gateway Strategy
-    # TODO: Determine provider from URL or headers. Assuming DUMMY for now.
-    gateway = get_payment_gateway("DUMMY")
+    gateway = get_payment_gateway(settings.PAYMENT_PROVIDER)
     try:
-        event = gateway.validate_webhook(payload, headers)
+        # Pass raw bytes if using Stripe
+        if settings.PAYMENT_PROVIDER == "STRIPE":
+             event = gateway.validate_webhook(body_bytes, headers)
+        else:
+             event = gateway.validate_webhook(payload, headers)
+             
     except Exception as e:
         logger.error(json.dumps({"event": "webhook_validation_failed", "error": str(e)}))
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
     
     # 3. Process Event
-    if event["status"] == "COMPLETED" or event["status"] == PaymentStatus.COMPLETED:
+    if event.get("status") == "COMPLETED" or event.get("status") == PaymentStatus.PAID:
         booking_id = event["booking_id"]
         transaction_id = event.get("transaction_id")
         

@@ -21,6 +21,9 @@ import ContentMessages from './pages/ContentMessages';
 import ContentTestimonials from './pages/ContentTestimonials';
 import ContentBlog from './pages/ContentBlog';
 
+import Finance from './pages/Finance';
+import CalendarPage from './pages/Calendar';
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -32,6 +35,8 @@ function App() {
             {/* Protected Admin Routes with Layout */}
             <Route element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/admin/finance" element={<Finance />} />
+              <Route path="/admin/calendar" element={<CalendarPage />} />
               <Route path="/messages" element={<ContentMessages />} />
               <Route path="/testimonials" element={<ContentTestimonials />} />
               <Route path="/blog" element={<ContentBlog />} />

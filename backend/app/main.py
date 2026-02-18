@@ -32,6 +32,19 @@ app.include_router(finance.router, prefix="/admin/finance", tags=["finance"])
 app.include_router(payments.router, prefix="/payments", tags=["payments"])
 app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["calendar"])
 
+from app.api.routers import ops
+app.include_router(ops.router, prefix="/ops", tags=["ops"])
+
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Ensure uploads directory exists
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Mount uploads directory for static access
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 from app.api.routers import content, admin_content
 app.include_router(content.router, prefix="/content", tags=["content"])
 app.include_router(admin_content.router, prefix="/admin/content", tags=["admin-content"])
@@ -76,5 +89,9 @@ def health_check():
 from app.core.scheduler import start_scheduler
 
 @app.on_event("startup")
+@app.on_event("startup")
 async def startup_event():
-    start_scheduler()
+    if settings.ENABLE_INTERNAL_SCHEDULER:
+        start_scheduler()
+    else:
+        logging.info("Internal scheduler disabled by configuration.")

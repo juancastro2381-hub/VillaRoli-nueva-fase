@@ -6,6 +6,27 @@ export default {
   theme: {
     extend: {
       colors: {
+        background: '#ffffff',
+        foreground: '#111827',
+        card: {
+          DEFAULT: '#ffffff',
+          foreground: '#111827',
+        },
+        popover: {
+          DEFAULT: '#ffffff',
+          foreground: '#111827',
+        },
+        muted: {
+          DEFAULT: '#f3f4f6',
+          foreground: '#6b7280',
+        },
+        destructive: {
+          DEFAULT: '#ef4444',
+          foreground: '#ffffff',
+        },
+        border: '#e5e7eb',
+        input: '#e5e7eb',
+        ring: '#F7C846',
         primary: {
           50: '#FFFBEB',
           100: '#FEF3C7',
@@ -17,6 +38,8 @@ export default {
           700: '#B45309',
           800: '#92400E',
           900: '#78350F',
+          DEFAULT: '#F7C846',
+          foreground: '#111827',
         },
         secondary: {
           50: '#F0F9E8',
@@ -67,65 +90,65 @@ export default {
           900: '#7F1D1D',
         },
       },
-      fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+    },
+    fontFamily: {
+      sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+    },
+    boxShadow: {
+      'sm': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+      'DEFAULT': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)',
+      'md': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)',
+      'lg': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
+      'xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+      '2xl': '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+      'inner': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)',
+      'glow-primary': '0 0 20px rgba(247, 200, 70, 0.5)',
+      'glow-secondary': '0 0 20px rgba(117, 171, 87, 0.5)',
+      'card-hover': '0 20px 40px -10px rgba(0, 0, 0, 0.15)',
+    },
+    backgroundImage: {
+      'gradient-primary': 'linear-gradient(135deg, #F7C846 0%, #D97706 100%)',
+      'gradient-secondary': 'linear-gradient(135deg, #75AB57 0%, #5D8A46 100%)',
+      'gradient-success': 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+      'gradient-danger': 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+      'gradient-radial': 'radial-gradient(circle at center, var(--tw-gradient-stops))',
+      'pattern-dots': 'radial-gradient(circle, rgba(0,0,0,0.05) 1px, transparent 1px)',
+    },
+    backgroundSize: {
+      'pattern-dots': '20px 20px',
+    },
+    animation: {
+      'fade-in': 'fadeIn 0.5s ease-in-out',
+      'slide-up': 'slideUp 0.4s ease-out',
+      'slide-down': 'slideDown 0.4s ease-out',
+      'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      'bounce-subtle': 'bounceSubtle 2s infinite',
+      'glow': 'glow 2s ease-in-out infinite',
+    },
+    keyframes: {
+      fadeIn: {
+        '0%': { opacity: '0' },
+        '100%': { opacity: '1' },
       },
-      boxShadow: {
-        'sm': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-        'DEFAULT': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)',
-        'md': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)',
-        'lg': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
-        'xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-        '2xl': '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-        'inner': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)',
-        'glow-primary': '0 0 20px rgba(247, 200, 70, 0.5)',
-        'glow-secondary': '0 0 20px rgba(117, 171, 87, 0.5)',
-        'card-hover': '0 20px 40px -10px rgba(0, 0, 0, 0.15)',
+      slideUp: {
+        '0%': { transform: 'translateY(20px)', opacity: '0' },
+        '100%': { transform: 'translateY(0)', opacity: '1' },
       },
-      backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #F7C846 0%, #D97706 100%)',
-        'gradient-secondary': 'linear-gradient(135deg, #75AB57 0%, #5D8A46 100%)',
-        'gradient-success': 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-        'gradient-danger': 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
-        'gradient-radial': 'radial-gradient(circle at center, var(--tw-gradient-stops))',
-        'pattern-dots': 'radial-gradient(circle, rgba(0,0,0,0.05) 1px, transparent 1px)',
+      slideDown: {
+        '0%': { transform: 'translateY(-20px)', opacity: '0' },
+        '100%': { transform: 'translateY(0)', opacity: '1' },
       },
-      backgroundSize: {
-        'pattern-dots': '20px 20px',
+      bounceSubtle: {
+        '0%, 100%': { transform: 'translateY(0)' },
+        '50%': { transform: 'translateY(-5px)' },
       },
-      animation: {
-        'fade-in': 'fadeIn 0.5s ease-in-out',
-        'slide-up': 'slideUp 0.4s ease-out',
-        'slide-down': 'slideDown 0.4s ease-out',
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'bounce-subtle': 'bounceSubtle 2s infinite',
-        'glow': 'glow 2s ease-in-out infinite',
+      glow: {
+        '0%, 100%': { boxShadow: '0 0 20px rgba(247, 200, 70, 0.5)' },
+        '50%': { boxShadow: '0 0 30px rgba(247, 200, 70, 0.8)' },
       },
-      keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        slideUp: {
-          '0%': { transform: 'translateY(20px)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
-        },
-        slideDown: {
-          '0%': { transform: 'translateY(-20px)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
-        },
-        bounceSubtle: {
-          '0%, 100%': { transform: 'translateY(0)' },
-          '50%': { transform: 'translateY(-5px)' },
-        },
-        glow: {
-          '0%, 100%': { boxShadow: '0 0 20px rgba(247, 200, 70, 0.5)' },
-          '50%': { boxShadow: '0 0 30px rgba(247, 200, 70, 0.8)' },
-        },
-      },
-      backdropBlur: {
-        xs: '2px',
-      },
+    },
+    backdropBlur: {
+      xs: '2px',
     },
   },
   plugins: [],

@@ -70,9 +70,7 @@ export function EvidencePreviewModal({
 
     const handleDownload = () => {
         if (payment.evidence_url) {
-            const url = payment.evidence_url.startsWith('http')
-                ? payment.evidence_url
-                : `${API_BASE_URL}/${payment.evidence_url}`;
+            const url = normalizePath(payment.evidence_url);
             window.open(url, '_blank');
         }
     };
@@ -95,17 +93,23 @@ export function EvidencePreviewModal({
         }
     };
 
-    const evidenceUrl = payment.evidence_url
-        ? payment.evidence_url.startsWith('http')
-            ? payment.evidence_url
-            : `${API_BASE_URL}/${payment.evidence_url}`
-        : null;
+    const normalizePath = (path: string) => {
+        if (!path) return '';
+        if (path.startsWith('http')) return path;
+        // Replace backslashes with forward slashes (fix for Windows paths)
+        const cleanPath = path.replace(/\\/g, '/');
+        // Remove leading ./ or /
+        const relativePath = cleanPath.replace(/^(\.\/|\/)/, '');
+        return `${API_BASE_URL}/${relativePath}`;
+    };
+
+    const evidenceUrl = payment.evidence_url ? normalizePath(payment.evidence_url) : null;
 
     const isPDF = payment.evidence_url?.toLowerCase().endsWith('.pdf');
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto bg-white">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <FileText className="h-5 w-5" />

@@ -23,8 +23,15 @@ class Settings(BaseSettings):
     ]
     
     # Payments
+    PAYMENT_PROVIDER: str = "DUMMY" # DUMMY, STRIPE
     PAYMENT_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_SECRET_KEY: Optional[str] = None
+    STRIPE_WEBHOOK_SECRET: Optional[str] = None
     PENDING_TIMEOUT_MINUTES: int = 60
+    
+    # Operations
+    ENABLE_INTERNAL_SCHEDULER: bool = True
+    CRON_SECRET: str = "CHANGE_ME_CRON_SECRET"
     
     # Business Logic
     # Holidays are now managed by CalendarService
